@@ -4,11 +4,17 @@ const notion = new Client({
   auth: process.env.NOTION_TOKEN,
 });
 
-const dataSourceId = process.env.NOTION_DATA_SOURCE_ID;
+function requireEnv(name: string): string {
+  const value = process.env[name];
 
-if (!dataSourceId) {
-  throw new Error("NOTION_DATA_SOURCE_ID is not configured");
+  if (!value) {
+    throw new Error(`${name} is not configured`);
+  }
+
+  return value;
 }
+
+const dataSourceId = requireEnv("NOTION_DATA_SOURCE_ID");
 
 /* -----------------------------
    Types
