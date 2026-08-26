@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 
-type Props = {
+export default function CopyPromptButton({
+  text,
+}: {
   text: string;
-};
-
-export default function CopyPromptButton({ text }: Props) {
+}) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -19,24 +19,31 @@ export default function CopyPromptButton({ text }: Props) {
         setCopied(false);
       }, 2000);
     } catch (error) {
-      console.error("Copy failed:", error);
+      console.error(
+        "Failed to copy prompt:",
+        error
+      );
     }
   }
 
   return (
     <button
+      type="button"
       onClick={handleCopy}
       style={{
-        padding: "8px 14px",
-        borderRadius: "6px",
-        border: "1px solid #444",
-        background: "#222",
+        border: "1px solid #ddd",
+        background: "#111",
         color: "#fff",
+        borderRadius: "8px",
+        padding: "9px 14px",
+        fontSize: "13px",
         cursor: "pointer",
-        fontSize: "14px",
+        whiteSpace: "nowrap",
       }}
     >
-      {copied ? "✓ Copied" : "Copy Prompt"}
+      {copied
+        ? "Copied!"
+        : "Copy Prompt"}
     </button>
   );
 }
