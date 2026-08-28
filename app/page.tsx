@@ -2,6 +2,8 @@ import { getPromptVault } from "./lib/notion";
 import ThemeTabs from "./components/ThemeTabs";
 import Hero from "./components/Hero";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const prompts = await getPromptVault();
 
