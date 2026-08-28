@@ -1,5 +1,6 @@
 import { getPromptVault } from "./lib/notion";
 import ThemeTabs from "./components/ThemeTabs";
+import AutoRefresh from "./components/AutoRefresh";
 import Hero from "./components/Hero";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,8 @@ export default async function Home() {
         color: "#111",
       }}
     >
+      <AutoRefresh />
+
       {/* Hero */}
       <Hero />
 
