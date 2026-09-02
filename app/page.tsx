@@ -16,7 +16,7 @@ export default async function Home() {
         color: "#111",
       }}
     >
-      <AutoRefresh />
+
 
       {/* Hero */}
       <Hero />

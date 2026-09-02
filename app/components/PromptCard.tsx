@@ -9,81 +9,38 @@ export default function PromptCard({
   return (
     <Link
       href={`/prompt/${prompt.id}`}
-      style={{
-        display: "block",
-        textDecoration: "none",
-        color: "inherit",
-      }}
+      className="group block"
     >
-      <article
-        style={{
-          background: "#fff",
-          border: "1px solid #e5e5e5",
-          borderRadius: "12px",
-          overflow: "hidden",
-          cursor: "pointer",
-        }}
-      >
-        {prompt.mainImageUrl ? (
-          <img
-            src={prompt.mainImageUrl}
-            alt={prompt.title}
-            style={{
-              width: "100%",
-              aspectRatio: "4 / 5",
-              objectFit: "cover",
-              display: "block",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: "100%",
-              aspectRatio: "4 / 5",
-              background: "#eee",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#999",
-            }}
-          >
-            No Image
-          </div>
-        )}
+      <article>
+        {/* Image */}
+        <div className="overflow-hidden rounded-2xl bg-[#eee2f2]">
+          {prompt.mainImageUrl ? (
+            <img
+              src={prompt.mainImageUrl}
+              alt={prompt.title}
+              className="block aspect-[4/5] w-full object-cover transition duration-500 group-hover:scale-[1.02]"
+            />
+          ) : (
+            <div className="flex aspect-[4/5] w-full items-center justify-center text-sm text-[#8b8396]">
+              No Image
+            </div>
+          )}
+        </div>
 
-        <div style={{ padding: "14px" }}>
-          <h3
-            style={{
-              margin: 0,
-              fontSize: "17px",
-              lineHeight: 1.4,
-            }}
-          >
+        {/* Content */}
+        <div className="pt-4">
+          <h3 className="text-base font-semibold leading-7 text-[#39324a] transition group-hover:opacity-70 sm:text-lg">
             {prompt.title}
           </h3>
 
           {prompt.category && (
-            <p
-              style={{
-                marginTop: "8px",
-                marginBottom: "6px",
-                fontSize: "13px",
-                color: "#666",
-              }}
-            >
+            <p className="mt-1 text-xs tracking-wide text-[#8b8396] sm:text-sm">
               {prompt.category}
             </p>
           )}
 
           {prompt.tags.length > 0 && (
-            <p
-              style={{
-                margin: 0,
-                fontSize: "12px",
-                color: "#888",
-                lineHeight: 1.5,
-              }}
-            >
+            <p className="mt-2 text-xs leading-6 text-[#a09aaa]">
               {prompt.tags.join(" · ")}
             </p>
           )}

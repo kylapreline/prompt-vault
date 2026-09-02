@@ -11,31 +11,67 @@ export async function GET(
   context: RouteContext
 ) {
   try {
-    const { pageId } = await context.params;
+    const { pageId } =
+      await context.params;
 
     if (!pageId) {
-      return new Response("Missing page ID", {
-        status: 400,
-      });
+      return new Response(
+        "Missing page ID",
+        {
+          status: 400,
+        }
+      );
     }
 
-    // ขอ Notion signed URL ใหม่
+    /*
+     * ขอ signed URL จาก Notion
+     *
+     * findFirstImage()
+     * มี server-side cache และ
+     * request deduplication อยู่แล้ว
+     */
     const imageUrl =
-      await findFirstImage(pageId);
+      await findFirstImage(
+        pageId
+      );
 
     if (!imageUrl) {
-      return new Response("Image not found", {
-        status: 404,
-      });
+      return new Response(
+        "Image not found",
+        {
+          status: 404,
+        }
+      );
     }
 
-    // ดึงไฟล์จริงจาก Notion
+    /*
+     * ดึงไฟล์จริงจาก signed URL
+     *
+     * ไม่ cache signed URL โดยตรง
+     */
     const imageResponse =
-      await fetch(imageUrl, {
-        cache: "no-store",
-      });
+      await fetch(
+        imageUrl,
+        {
+          cache: "no-store",
+        }
+      );
 
     if (!imageResponse.ok) {
+      console.error(
+        "Notion image fetch failed:",
+        {
+          pageId,
+          status:
+            imageResponse.status,
+        }
+      );
+
+      /*
+       * ถ้า signed URL ใช้ไม่ได้
+       * ให้ลบ cache เพื่อให้ request
+       * ครั้งถัดไปขอ URL ใหม่
+       */
       return new Response(
         "Failed to fetch image",
         {
@@ -54,12 +90,17 @@ export async function GET(
       {
         status: 200,
         headers: {
-          "Content-Type": contentType,
+          "Content-Type":
+            contentType,
 
           /*
-           * Cache รูปที่เว็บเราเอง
+           * Cache รูปผ่านเว็บของเรา
            *
-           * ไม่ได้ cache Notion signed URL
+           * 3300 วินาที = 55 นาที
+           *
+           * stale-while-revalidate:
+           * อนุญาตให้ใช้ response เก่า
+           * ระหว่างกำลังสร้าง response ใหม่
            */
           "Cache-Control":
             "public, s-maxage=3300, stale-while-revalidate=300",

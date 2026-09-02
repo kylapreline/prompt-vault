@@ -42,21 +42,14 @@ export type Prompt = {
   status: string | null;
   isPublished: boolean;
 
-  // Tag ตัวที่ 1
   year: string | null;
-
-  // Tag ตัวที่ 2
   category: string | null;
-
-  // Tag ตัวที่ 3 เป็นต้นไป
   tags: string[];
 
   generatedBy: string[];
 
-  // Files & media สำหรับภาพอ้างอิง
   referenceImages: ReferenceImage[];
 
-  // ภาพหลักจาก Image Block
   mainImageUrl: string | null;
   imageUrl: string | null;
 
@@ -65,7 +58,6 @@ export type Prompt = {
 
   recommendation: string;
 
-  // ใช้สำหรับหน้า Detail
   content: PromptBlock[];
 };
 
@@ -217,7 +209,6 @@ function getBlockImageUrl(
 function getBlockMediaUrl(
   block: any
 ): string | null {
-  // Video block
   if (block.type === "video") {
     const video = block.video;
 
@@ -240,13 +231,108 @@ function getBlockMediaUrl(
     }
   }
 
-  // Embed block
   if (block.type === "embed") {
     return block.embed?.url ?? null;
   }
 
   return null;
 }
+
+/* -----------------------------
+   Notion Request Queue
+----------------------------- */
+
+/*
+ * ป้องกันไม่ให้หลาย request ยิง Notion API
+ * พร้อมกันจนเกิด rate limit
+ *
+ * เราจะเว้นระยะเล็กน้อยระหว่าง request
+ * ที่เข้าคิวจาก process เดียวกัน
+ */
+
+let notionQueue: Promise<void> = Promise.resolve();
+
+let lastNotionRequestTime = 0;
+
+const NOTION_REQUEST_DELAY = 350;
+
+async function waitForNotionSlot(): Promise<void> {
+  const previous = notionQueue;
+
+  let release!: () => void;
+
+  notionQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+
+  const elapsed =
+    Date.now() - lastNotionRequestTime;
+
+  const waitTime =
+    NOTION_REQUEST_DELAY - elapsed;
+
+  if (waitTime > 0) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, waitTime)
+    );
+  }
+
+  lastNotionRequestTime = Date.now();
+
+  release();
+}
+
+async function notionRequest<T>(
+  request: () => Promise<T>
+): Promise<T> {
+  await waitForNotionSlot();
+
+  try {
+    return await request();
+  } catch (error) {
+    console.error(
+      "Notion API request failed:",
+      error
+    );
+
+    throw error;
+  }
+}
+
+/* -----------------------------
+   Main Image Cache
+----------------------------- */
+
+/*
+ * Signed URL ของ Notion ไม่ควรเก็บไว้นานเกินไป
+ *
+ * ใช้ cache ประมาณ 50 นาที
+ * เพื่อให้มี margin ก่อน URL หมดอายุ
+ */
+
+const IMAGE_CACHE_TTL =
+  50 * 60 * 1000;
+
+type ImageCacheEntry = {
+  url: string;
+  expiresAt: number;
+};
+
+const imageCache =
+  new Map<string, ImageCacheEntry>();
+
+/*
+ * ป้องกัน request เดียวกันหลายตัว
+ * ที่เข้ามาพร้อมกัน
+ *
+ * เช่นรูป page เดียวกันถูกเรียก 5 ครั้ง
+ * จะใช้ Notion request เดียว
+ */
+
+const imageRequests =
+  new Map<string, Promise<string | null>>();
 
 /* -----------------------------
    Find Main Image
@@ -256,6 +342,7 @@ function getBlockMediaUrl(
  * หา Image Block แรกของ Prompt
  *
  * รองรับ:
+ *
  * Page
  * └── Column List
  *     ├── Column
@@ -264,31 +351,96 @@ function getBlockMediaUrl(
  *         └── Video / Embed
  *
  * จะหยุดทันทีเมื่อเจอ Image แรก
- * เพื่อไม่โหลด content ทั้งหมดโดยไม่จำเป็น
  */
 export async function findFirstImage(
   blockId: string
 ): Promise<string | null> {
-  let startCursor: string | undefined =
-    undefined;
+  /*
+   * ตรวจ cache ก่อน
+   */
+  const cached =
+    imageCache.get(blockId);
+
+  if (
+    cached &&
+    cached.expiresAt > Date.now()
+  ) {
+    return cached.url;
+  }
+
+  /*
+   * ถ้ามี request ที่กำลังทำอยู่
+   * ใช้ Promise เดิมแทน
+   */
+  const existingRequest =
+    imageRequests.get(blockId);
+
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const request =
+    findFirstImageUncached(blockId);
+
+  imageRequests.set(
+    blockId,
+    request
+  );
+
+  try {
+    const imageUrl =
+      await request;
+
+    if (imageUrl) {
+      imageCache.set(blockId, {
+        url: imageUrl,
+        expiresAt:
+          Date.now() +
+          IMAGE_CACHE_TTL,
+      });
+    }
+
+    return imageUrl;
+  } finally {
+    imageRequests.delete(blockId);
+  }
+}
+
+/**
+ * ค้นหา Image จาก Notion จริง ๆ
+ *
+ * ฟังก์ชันนี้จะถูกเรียกเฉพาะเมื่อ
+ * cache ไม่มีหรือหมดอายุ
+ */
+async function findFirstImageUncached(
+  blockId: string
+): Promise<string | null> {
+  let startCursor:
+    | string
+    | undefined = undefined;
 
   do {
     const response =
-      await notion.blocks.children.list({
-        block_id: blockId,
-        page_size: 100,
+      await notionRequest(() =>
+        notion.blocks.children.list({
+          block_id: blockId,
+          page_size: 100,
 
-        ...(startCursor
-          ? {
-              start_cursor: startCursor,
-            }
-          : {}),
-      });
+          ...(startCursor
+            ? {
+                start_cursor:
+                  startCursor,
+              }
+            : {}),
+        })
+      );
 
-    for (const block of response.results as any[]) {
+    for (
+      const block of
+      response.results as any[]
+    ) {
       /*
-       * ถ้าเป็น Image โดยตรง
-       * ใช้ทันที
+       * Image โดยตรง
        */
       const imageUrl =
         getBlockImageUrl(block);
@@ -298,26 +450,22 @@ export async function findFirstImage(
       }
 
       /*
-       * ภาพหลักของเราใช้โครงสร้าง:
-       *
-       * Page
-       * └── Column List
-       *     └── Column
-       *         └── Image
-       *
-       * จึงค้นต่อเฉพาะ container
-       * ที่เกี่ยวข้องกับ layout นี้
+       * ค้นต่อเฉพาะ container
        */
       const shouldSearchChildren =
-        block.type === "column_list" ||
-        block.type === "column";
+        block.type ===
+          "column_list" ||
+        block.type ===
+          "column";
 
       if (
         shouldSearchChildren &&
         block.has_children
       ) {
         const childImageUrl =
-          await findFirstImage(block.id);
+          await findFirstImage(
+            block.id
+          );
 
         if (childImageUrl) {
           return childImageUrl;
@@ -325,9 +473,11 @@ export async function findFirstImage(
       }
     }
 
-    startCursor = response.has_more
-      ? response.next_cursor ?? undefined
-      : undefined;
+    startCursor =
+      response.has_more
+        ? response.next_cursor ??
+          undefined
+        : undefined;
   } while (startCursor);
 
   return null;
@@ -341,59 +491,181 @@ export async function findFirstImage(
  * ดึง Blocks ทั้งหมดของ Prompt
  *
  * ใช้สำหรับหน้า Detail
- *
- * รองรับ nested blocks เช่น
- * Column List
- * Column
- * Image
- * Video
- * Embed
  */
 export async function getPromptContent(
   blockId: string
 ): Promise<PromptBlock[]> {
-  const allBlocks: PromptBlock[] = [];
+  const allBlocks: PromptBlock[] =
+    [];
 
-  let startCursor: string | undefined =
-    undefined;
+  let startCursor:
+    | string
+    | undefined = undefined;
 
   do {
     const response =
-      await notion.blocks.children.list({
-        block_id: blockId,
-        page_size: 100,
+      await notionRequest(() =>
+        notion.blocks.children.list({
+          block_id: blockId,
+          page_size: 100,
 
-        ...(startCursor
-          ? {
-              start_cursor: startCursor,
-            }
-          : {}),
-      });
+          ...(startCursor
+            ? {
+                start_cursor:
+                  startCursor,
+              }
+            : {}),
+        })
+      );
 
-    for (const block of response.results as any[]) {
+    for (
+      const block of
+      response.results as any[]
+    ) {
       allBlocks.push({
         id: block.id,
         type: block.type,
-        content: getBlockText(block),
-        imageUrl: getBlockImageUrl(block),
-        mediaUrl: getBlockMediaUrl(block),
+        content:
+          getBlockText(block),
+        imageUrl:
+          getBlockImageUrl(
+            block
+          ),
+        mediaUrl:
+          getBlockMediaUrl(
+            block
+          ),
       });
 
-      // รองรับ Column / Column List / nested blocks
+      /*
+       * ดึง nested blocks
+       * เฉพาะเมื่อมีจริง
+       */
       if (block.has_children) {
         const childBlocks =
-          await getPromptContent(block.id);
+          await getPromptContent(
+            block.id
+          );
 
-        allBlocks.push(...childBlocks);
+        allBlocks.push(
+          ...childBlocks
+        );
       }
     }
 
-    startCursor = response.has_more
-      ? response.next_cursor ?? undefined
-      : undefined;
+    startCursor =
+      response.has_more
+        ? response.next_cursor ??
+          undefined
+        : undefined;
   } while (startCursor);
 
   return allBlocks;
+}
+
+/* -----------------------------
+   Prompt Mapper
+----------------------------- */
+
+/**
+ * แปลง Notion Page → Prompt
+ */
+function mapPageToPrompt(
+  page: any,
+  content: PromptBlock[] = []
+): Prompt {
+  const properties =
+    page.properties;
+
+  const allTags =
+    getMultiSelect(
+      properties["แท็ก"]
+    );
+
+  /*
+   * ภาพหลักใช้ Image Proxy
+   *
+   * ไม่เก็บ Notion signed URL
+   */
+  const mainImageUrl =
+    `/api/prompt-image/${page.id}`;
+
+  return {
+    id: page.id,
+
+    title:
+      getTitle(
+        properties["ชื่อ"]
+      ),
+
+    introTh:
+      getRichText(
+        properties["Intro (TH)"]
+      ),
+
+    introEn:
+      getRichText(
+        properties["Intro (EN)"]
+      ),
+
+    publishedDate:
+      getDate(
+        properties[
+          "Published Date"
+        ]
+      ),
+
+    status:
+      getSelect(
+        properties["Status"]
+      ),
+
+    isPublished:
+      getFormulaBoolean(
+        properties[
+          "Is Published?"
+        ]
+      ),
+
+    year:
+      allTags[0] ?? null,
+
+    category:
+      allTags[1] ?? null,
+
+    tags:
+      allTags.slice(2),
+
+    generatedBy:
+      getMultiSelect(
+        properties[
+          "Generated by"
+        ]
+      ),
+
+    referenceImages:
+      getFiles(
+        properties[
+          "Files & media"
+        ]
+      ),
+
+    mainImageUrl,
+
+    imageUrl:
+      mainImageUrl,
+
+    hasVideo: false,
+
+    videoUrl: null,
+
+    recommendation:
+      getRichText(
+        properties["แนะนำ"]
+      ),
+
+    content,
+  };
 }
 
 /* -----------------------------
@@ -403,176 +675,73 @@ export async function getPromptContent(
 export async function getPromptVault(): Promise<
   Prompt[]
 > {
-  const allResults: any[] = [];
+  const allResults: any[] =
+    [];
 
-  let startCursor: string | undefined =
-    undefined;
+  let startCursor:
+    | string
+    | undefined = undefined;
 
-  /*
-   * ดึง Prompt ทั้งหมดแบบ pagination
-   */
   do {
     const response =
-      await notion.dataSources.query({
-        data_source_id: dataSourceId,
+      await notionRequest(() =>
+        notion.dataSources.query({
+          data_source_id:
+            dataSourceId,
 
-        filter: {
-          property: "Is Published?",
-          formula: {
-            checkbox: {
-              equals: true,
+          filter: {
+            property:
+              "Is Published?",
+            formula: {
+              checkbox: {
+                equals: true,
+              },
             },
           },
-        },
 
-        sorts: [
-          {
-            property: "Published Date",
-            direction: "descending",
-          },
-        ],
+          sorts: [
+            {
+              property:
+                "Published Date",
+              direction:
+                "descending",
+            },
+          ],
 
-        page_size: 100,
+          page_size: 100,
 
-        ...(startCursor
-          ? {
-              start_cursor: startCursor,
-            }
-          : {}),
-      });
+          ...(startCursor
+            ? {
+                start_cursor:
+                  startCursor,
+              }
+            : {}),
+        })
+      );
 
     allResults.push(
       ...response.results
     );
 
-    startCursor = response.has_more
-      ? response.next_cursor ?? undefined
-      : undefined;
+    startCursor =
+      response.has_more
+        ? response.next_cursor ??
+          undefined
+        : undefined;
   } while (startCursor);
 
   /*
-   * แปลง Database properties
+   * Gallery ไม่เรียก
+   * getPromptContent()
    *
-   * สำคัญ:
-   * ภาพหลักจะมาจาก Image Block
-   * ไม่ใช่ Files & media
+   * ดังนั้น query หนึ่งครั้ง
+   * ไม่ตามด้วย request
+   * ของทุก Block
    */
-  const prompts = await Promise.all(
-    allResults.map(
-      async (page: any): Promise<Prompt> => {
-        const properties =
-          page.properties;
-
-        const allTags =
-          getMultiSelect(
-            properties["แท็ก"]
-          );
-
-        /*
-         * ใช้ Image Proxy ของเว็บไซต์
-         *
-         * ไม่เก็บ Notion signed URL
-         * เพราะ URL ของไฟล์ Notion มีอายุจำกัด
-         */
-        const mainImageUrl =
-          `/api/prompt-image/${page.id}`;
-
-        return {
-          id: page.id,
-
-          title: getTitle(
-            properties["ชื่อ"]
-          ),
-
-          introTh: getRichText(
-            properties["Intro (TH)"]
-          ),
-
-          introEn: getRichText(
-            properties["Intro (EN)"]
-          ),
-
-          publishedDate: getDate(
-            properties["Published Date"]
-          ),
-
-          status: getSelect(
-            properties["Status"]
-          ),
-
-          isPublished:
-            getFormulaBoolean(
-              properties["Is Published?"]
-            ),
-
-          // Tag 1 = Year
-          year:
-            allTags[0] ?? null,
-
-          // Tag 2 = Category / Theme
-          category:
-            allTags[1] ?? null,
-
-          // Tag 3+ = Tags
-          tags:
-            allTags.slice(2),
-
-          generatedBy:
-            getMultiSelect(
-              properties["Generated by"]
-            ),
-
-          /*
-           * Files & media
-           *
-           * รองรับ 0, 1 หรือ 2 ภาพ
-           * โดยไม่จำกัดจำนวนใน data layer
-           */
-          referenceImages:
-            getFiles(
-              properties["Files & media"]
-            ),
-
-          /*
-           * ภาพหลักของ Prompt
-           *
-           * ใช้ Image Proxy
-           * ไม่ใช้ Files & media
-           */
-          mainImageUrl,
-
-          /*
-           * imageUrl ยังคงเก็บค่าเดียวกับ
-           * mainImageUrl เพื่อให้ component
-           * เดิมที่เรียก imageUrl ยังทำงานได้
-           */
-          imageUrl: mainImageUrl,
-
-          /*
-           * Gallery ยังไม่ตรวจ Video
-           *
-           * Video / Embed จะถูกโหลดใน
-           * getPromptContent() ตอนหน้า Detail
-           */
-          hasVideo: false,
-
-          videoUrl: null,
-
-          recommendation:
-            getRichText(
-              properties["แนะนำ"]
-            ),
-
-          /*
-           * Gallery ไม่โหลด content ทั้งหมด
-           */
-          content: [],
-        };
-      }
-    )
+  return allResults.map(
+    (page): Prompt =>
+      mapPageToPrompt(page)
   );
-
-  return prompts;
 }
 
 /* -----------------------------
@@ -583,91 +752,30 @@ export async function getPromptById(
   pageId: string
 ): Promise<Prompt | null> {
   try {
+    /*
+     * ดึงข้อมูล Page ก่อน
+     */
     const page =
-      await notion.pages.retrieve({
-        page_id: pageId,
-      });
-
-    const properties =
-      (page as any).properties;
-
-    const allTags =
-      getMultiSelect(
-        properties["แท็ก"]
+      await notionRequest(() =>
+        notion.pages.retrieve({
+          page_id: pageId,
+        })
       );
 
-    const mainImageUrl =
-      `/api/prompt-image/${pageId}`;
+    /*
+     * ดึง Content เฉพาะหน้า Detail
+     *
+     * Gallery จะไม่เรียกส่วนนี้
+     */
+    const content =
+      await getPromptContent(
+        pageId
+      );
 
-    return {
-      id: page.id,
-
-      title: getTitle(
-        properties["ชื่อ"]
-      ),
-
-      introTh: getRichText(
-        properties["Intro (TH)"]
-      ),
-
-      introEn: getRichText(
-        properties["Intro (EN)"]
-      ),
-
-      publishedDate: getDate(
-        properties["Published Date"]
-      ),
-
-      status: getSelect(
-        properties["Status"]
-      ),
-
-      isPublished:
-        getFormulaBoolean(
-          properties["Is Published?"]
-        ),
-
-      // Tag 1 = Year
-      year:
-        allTags[0] ?? null,
-
-      // Tag 2 = Theme
-      category:
-        allTags[1] ?? null,
-
-      // Tag 3+ = Tags
-      tags:
-        allTags.slice(2),
-
-      generatedBy:
-        getMultiSelect(
-          properties["Generated by"]
-        ),
-
-      // Files & media
-      referenceImages:
-        getFiles(
-          properties["Files & media"]
-        ),
-
-      // Main Image
-      mainImageUrl,
-
-      imageUrl: mainImageUrl,
-
-      hasVideo: false,
-
-      videoUrl: null,
-
-      recommendation:
-        getRichText(
-          properties["แนะนำ"]
-        ),
-
-      // Content จะโหลดแยกด้านล่าง
-      content:
-        await getPromptContent(pageId),
-    };
+    return mapPageToPrompt(
+      page,
+      content
+    );
   } catch (error) {
     console.error(
       "Failed to get prompt:",
