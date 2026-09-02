@@ -1,30 +1,89 @@
 "use client";
 
 import { useState } from "react";
-import type { Prompt } from "../lib/notion";
+import type { Prompt, PromptPage } from "../lib/notion";
 import PromptCard from "./PromptCard";
 
 export default function ThemeTabs({
-  prompts,
+  initialPage,
+  themes,
 }: {
-  prompts: Prompt[];
+  initialPage: PromptPage;
+  themes: string[];
 }) {
   const [activeTheme, setActiveTheme] = useState("All");
+  const [pages, setPages] = useState<Record<string, PromptPage>>({
+    All: initialPage,
+  });
+  const [loadingTheme, setLoadingTheme] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const themes = Array.from(
-    new Set(
-      prompts
-        .map((prompt) => prompt.category)
-        .filter(Boolean)
-    )
-  ) as string[];
+  const currentPage = pages[activeTheme];
+  const prompts = currentPage?.prompts ?? [];
+  const isLoading = loadingTheme === activeTheme;
 
-  const filteredPrompts =
-    activeTheme === "All"
-      ? prompts
-      : prompts.filter(
-          (prompt) => prompt.category === activeTheme
-        );
+  async function fetchPage(theme: string, cursor?: string | null) {
+    const params = new URLSearchParams();
+
+    if (theme !== "All") params.set("category", theme);
+    if (cursor) params.set("cursor", cursor);
+
+    const response = await fetch(`/api/prompts?${params.toString()}`);
+
+    if (!response.ok) {
+      throw new Error("Unable to load prompts");
+    }
+
+    return (await response.json()) as PromptPage;
+  }
+
+  async function selectTheme(theme: string) {
+    if (loadingTheme && loadingTheme !== theme) return;
+
+    setActiveTheme(theme);
+    setError(null);
+
+    if (pages[theme] || loadingTheme === theme) return;
+
+    setLoadingTheme(theme);
+
+    try {
+      const page = await fetchPage(theme);
+      setPages((current) => ({ ...current, [theme]: page }));
+    } catch (loadError) {
+      console.error(loadError);
+      setError("โหลด Prompt ไม่สำเร็จ กรุณาลองอีกครั้ง");
+    } finally {
+      setLoadingTheme(null);
+    }
+  }
+
+  async function loadMore() {
+    if (!currentPage?.nextCursor || isLoading) return;
+
+    setLoadingTheme(activeTheme);
+    setError(null);
+
+    try {
+      const nextPage = await fetchPage(activeTheme, currentPage.nextCursor);
+      setPages((current) => ({
+        ...current,
+        [activeTheme]: {
+          prompts: [
+            ...(current[activeTheme]?.prompts ?? []),
+            ...nextPage.prompts,
+          ],
+          nextCursor: nextPage.nextCursor,
+          hasMore: nextPage.hasMore,
+        },
+      }));
+    } catch (loadError) {
+      console.error(loadError);
+      setError("โหลด Prompt เพิ่มไม่สำเร็จ กรุณาลองอีกครั้ง");
+    } finally {
+      setLoadingTheme(null);
+    }
+  }
 
   return (
     <section>
@@ -45,7 +104,7 @@ export default function ThemeTabs({
             <button
               key={theme}
               type="button"
-              onClick={() => setActiveTheme(theme)}
+              onClick={() => selectTheme(theme)}
               style={{
                 flexShrink: 0,
                 padding: "9px 18px",
@@ -74,7 +133,7 @@ export default function ThemeTabs({
       </h2>
 
       {/* Gallery */}
-      {filteredPrompts.length > 0 ? (
+      {prompts.length > 0 ? (
         <div
           style={{
             display: "grid",
@@ -83,13 +142,15 @@ export default function ThemeTabs({
             gap: "20px",
           }}
         >
-          {filteredPrompts.map((prompt) => (
+          {prompts.map((prompt: Prompt) => (
             <PromptCard
               key={prompt.id}
               prompt={prompt}
             />
           ))}
         </div>
+      ) : isLoading ? (
+        <p style={{ color: "#777" }}>กำลังโหลด Prompt...</p>
       ) : (
         <p
           style={{
@@ -98,6 +159,32 @@ export default function ThemeTabs({
         >
           ยังไม่มี Prompt ใน Theme นี้
         </p>
+      )}
+
+      {error && (
+        <p role="alert" style={{ color: "#b42318", marginTop: "20px" }}>
+          {error}
+        </p>
+      )}
+
+      {currentPage?.hasMore && (
+        <div style={{ textAlign: "center", marginTop: "30px" }}>
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={isLoading}
+            style={{
+              padding: "10px 22px",
+              borderRadius: "999px",
+              border: "1px solid #ddd",
+              background: "#fff",
+              color: "#333",
+              cursor: isLoading ? "wait" : "pointer",
+            }}
+          >
+            {isLoading ? "กำลังโหลด..." : "โหลดเพิ่มเติม"}
+          </button>
+        </div>
       )}
     </section>
   );

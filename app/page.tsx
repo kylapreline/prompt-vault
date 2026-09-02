@@ -1,12 +1,47 @@
-import { getPromptVault } from "./lib/notion";
+import {
+  getPromptThemes,
+  getPromptVaultPage,
+} from "./lib/notion";
+import type { PromptPage } from "./lib/notion";
 import ThemeTabs from "./components/ThemeTabs";
-import AutoRefresh from "./components/AutoRefresh";
 import Hero from "./components/Hero";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const prompts = await getPromptVault();
+  let initialPage: PromptPage = {
+    prompts: [],
+    nextCursor: null,
+    hasMore: false,
+  };
+  let themes: string[] = [];
+
+  const [promptResult, themeResult] = await Promise.allSettled([
+    getPromptVaultPage(),
+    getPromptThemes(),
+  ]);
+
+  if (promptResult.status === "fulfilled") {
+    initialPage = promptResult.value;
+  } else {
+    console.error("Failed to load prompt gallery:", promptResult.reason);
+  }
+
+  if (themeResult.status === "fulfilled") {
+    themes = themeResult.value;
+  } else {
+    console.error("Failed to load prompt themes:", themeResult.reason);
+  }
+
+  if (themes.length === 0) {
+    themes = Array.from(
+      new Set(
+        initialPage.prompts.flatMap((prompt) =>
+          prompt.category ? [prompt.category] : []
+        )
+      )
+    );
+  }
 
   return (
     <main
@@ -51,7 +86,7 @@ export default async function Home() {
           padding: "20px",
         }}
       >
-        <ThemeTabs prompts={prompts} />
+        <ThemeTabs initialPage={initialPage} themes={themes} />
       </section>
     </main>
   );
