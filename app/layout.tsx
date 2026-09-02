@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Anuphan } from "next/font/google";
 import "./globals.css";
 import Header from "./components/Header";
+import Footer from "./components/Footer";
 
 const anuphan = Anuphan({
   variable: "--font-anuphan",
@@ -9,8 +10,11 @@ const anuphan = Anuphan({
 });
 
 export const metadata: Metadata = {
-  title: "Kyla Notion Web",
-  description: "Prompt Gallery",
+  title: "Kyla Preline's Prompt Vault",
+  description: "Prompt gallery by Kyla Preline",
+  icons: {
+    icon: "/Kyla-favicon.png",
+  },
 };
 
 export default function RootLayout({
@@ -23,7 +27,8 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <Header />
-        {children}
+        <div className="flex-1">{children}</div>
+        <Footer />
       </body>
     </html>
   );

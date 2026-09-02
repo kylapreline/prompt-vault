@@ -61,6 +61,18 @@ export type Prompt = {
   content: PromptBlock[];
 };
 
+export type PromptPage = {
+  prompts: Prompt[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+export type PromptPageOptions = {
+  category?: string | null;
+  cursor?: string | null;
+  pageSize?: number;
+};
+
 /* -----------------------------
    Property Helpers
 ----------------------------- */
@@ -93,6 +105,17 @@ function getMultiSelect(property: any): string[] {
   return property.multi_select.map(
     (item: any) => item.name
   );
+}
+
+/**
+ * Temporary Notion schema convention:
+ * `แท็ก` item 1 = year, item 2 = theme/category, remaining items = tags.
+ * Keep this logic in one place until category has its own Notion property.
+ */
+function getPromptCategory(properties: any): string | null {
+  const allTags = getMultiSelect(properties["แท็ก"]);
+
+  return allTags[1] ?? null;
 }
 
 function getFiles(property: any): ReferenceImage[] {
@@ -631,7 +654,7 @@ function mapPageToPrompt(
       allTags[0] ?? null,
 
     category:
-      allTags[1] ?? null,
+      getPromptCategory(properties),
 
     tags:
       allTags.slice(2),
@@ -671,6 +694,204 @@ function mapPageToPrompt(
 /* -----------------------------
    Prompt Vault
 ----------------------------- */
+
+const GALLERY_PAGE_SIZE = 16;
+const GALLERY_CACHE_TTL = 60 * 1000;
+const THEME_CACHE_TTL = 10 * 60 * 1000;
+
+type GalleryCacheEntry = {
+  page: PromptPage;
+  expiresAt: number;
+};
+
+const galleryCache = new Map<string, GalleryCacheEntry>();
+const galleryRequests = new Map<string, Promise<PromptPage>>();
+
+let themeCache: {
+  themes: string[];
+  expiresAt: number;
+} | null = null;
+let themeRequest: Promise<string[]> | null = null;
+
+/**
+ * โหลดรายชื่อ theme ของ prompt ที่เผยแพร่แล้วโดยไม่โหลด block content
+ * และ cache ไว้นานกว่า gallery pages เพื่อลด Notion API calls.
+ */
+export async function getPromptThemes(): Promise<string[]> {
+  if (themeCache && themeCache.expiresAt > Date.now()) {
+    return themeCache.themes;
+  }
+
+  if (themeRequest) {
+    return themeRequest;
+  }
+
+  themeRequest = queryPromptThemes();
+
+  try {
+    const themes = await themeRequest;
+
+    themeCache = {
+      themes,
+      expiresAt: Date.now() + THEME_CACHE_TTL,
+    };
+
+    return themes;
+  } finally {
+    themeRequest = null;
+  }
+}
+
+async function queryPromptThemes(): Promise<string[]> {
+  const themes = new Set<string>();
+  let startCursor: string | undefined;
+
+  do {
+    const response = await notionRequest(() =>
+      notion.dataSources.query({
+        data_source_id: dataSourceId,
+        filter: {
+          property: "Is Published?",
+          formula: {
+            checkbox: {
+              equals: true,
+            },
+          },
+        },
+        page_size: 100,
+        ...(startCursor
+          ? {
+              start_cursor: startCursor,
+            }
+          : {}),
+      })
+    );
+
+    response.results.forEach((page) => {
+      if (!("properties" in page)) return;
+
+      const category = getPromptCategory(page.properties);
+
+      if (category) themes.add(category);
+    });
+
+    startCursor = response.has_more
+      ? response.next_cursor ?? undefined
+      : undefined;
+  } while (startCursor);
+
+  return Array.from(themes);
+}
+
+/**
+ * ดึงข้อมูลสำหรับ Gallery เพียงหนึ่งหน้า
+ *
+ * Is Published? เป็น formula ใน Notion ซึ่งเป็น source of truth
+ * สำหรับ status, Publish Date/Time และ timezone Asia/Bangkok
+ * จึงไม่คำนวณเวลาเผยแพร่ซ้ำใน React
+ */
+export async function getPromptVaultPage({
+  category,
+  cursor,
+  pageSize = GALLERY_PAGE_SIZE,
+}: PromptPageOptions = {}): Promise<PromptPage> {
+  const safePageSize = Math.min(
+    GALLERY_PAGE_SIZE,
+    Math.max(1, Math.floor(pageSize))
+  );
+  const cacheKey = JSON.stringify([
+    category ?? "All",
+    cursor ?? "",
+    safePageSize,
+  ]);
+  const cached = galleryCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.page;
+  }
+
+  const existingRequest = galleryRequests.get(cacheKey);
+
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const request = queryPromptVaultPage(
+    category,
+    cursor,
+    safePageSize
+  );
+
+  galleryRequests.set(cacheKey, request);
+
+  try {
+    const page = await request;
+
+    galleryCache.set(cacheKey, {
+      page,
+      expiresAt: Date.now() + GALLERY_CACHE_TTL,
+    });
+
+    return page;
+  } finally {
+    galleryRequests.delete(cacheKey);
+  }
+}
+
+async function queryPromptVaultPage(
+  category: string | null | undefined,
+  cursor: string | null | undefined,
+  pageSize: number
+): Promise<PromptPage> {
+
+  const publishedFilter = {
+    property: "Is Published?",
+    formula: {
+      checkbox: {
+        equals: true,
+      },
+    },
+  } as const;
+
+  const response = await notionRequest(() =>
+    notion.dataSources.query({
+      data_source_id: dataSourceId,
+      filter: category
+        ? {
+            and: [
+              publishedFilter,
+              {
+                property: "แท็ก",
+                multi_select: {
+                  contains: category,
+                },
+              },
+            ],
+          }
+        : publishedFilter,
+      sorts: [
+        {
+          property: "Published Date",
+          direction: "descending",
+        },
+      ],
+      page_size: pageSize,
+      ...(cursor
+        ? {
+            start_cursor: cursor,
+          }
+        : {}),
+    })
+  );
+
+  return {
+    prompts: response.results.map((page) =>
+      mapPageToPrompt(page)
+    ),
+    nextCursor: response.next_cursor,
+    hasMore: response.has_more,
+  };
+}
 
 export async function getPromptVault(): Promise<
   Prompt[]
