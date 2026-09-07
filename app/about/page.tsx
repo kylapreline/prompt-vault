@@ -178,33 +178,81 @@ export default function AboutPage() {
         </div>
       </section>
 
-            {/* A Little Space to Explore */}
-      <section className="mx-auto w-full max-w-[1400px] px-6 py-16 sm:px-10 sm:py-20 lg:px-16">
-        <div className="rounded-[2rem] bg-[#eee2f2] px-6 py-12 sm:px-10 sm:py-16 lg:px-16">
-          <div className="max-w-3xl">
-            <p className="text-sm tracking-[0.2em] text-[#8b8396]">
-              A LITTLE SPACE TO EXPLORE
+            {/* Kyla's Prompt Collection */}
+<section className="mx-auto w-full max-w-[1400px] px-6 py-16 sm:px-10 sm:py-20 lg:px-16">
+  <div className="rounded-[2rem] bg-[#eee2f2] px-6 py-12 sm:px-10 sm:py-16 lg:px-16">
+    <div className="max-w-3xl">
+      <p className="text-sm tracking-[0.2em] text-[#8b8396]">
+        KYLA'S PROMPT COLLECTION
+      </p>
+
+      <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#39324a] sm:text-4xl">
+        Prompt ที่เคียล่าอยากแบ่งปัน
+      </h2>
+
+      <p className="mt-6 text-base leading-8 text-[#39324a] sm:text-lg sm:leading-9">
+        รวม Prompt สำหรับสร้างภาพของน้องเคียล่า
+        ถ่ายทอดไอเดีย ลุค และเรื่องราวต่าง ๆ
+      </p>
+
+      <details className="group mt-6">
+        <summary className="flex cursor-pointer list-none items-center text-sm font-medium tracking-wide text-[#39324a]">
+          <span className="group-open:hidden">＋ READ MORE</span>
+          <span className="hidden group-open:inline">− CLOSE</span>
+        </summary>
+
+        <div className="mt-6 space-y-5 text-base leading-8 text-[#39324a] sm:text-lg sm:leading-9">
+          {/* Thai */}
+          <div>
+            <p>
+              Prompt Collection นี้เน้นการสร้างภาพด้วย Gemini และ ChatGPT
+              โดยแต่ละ Prompt ถ่ายทอดไอเดีย ลุค และเรื่องราวในรูปแบบต่าง ๆ
             </p>
 
-            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-[#39324a] sm:text-4xl">
-              เรื่องราวเล็ก ๆ ที่อยากชวนให้มาค้นพบ
-            </h2>
-
-            <p className="mt-6 text-base leading-8 text-[#39324a] sm:text-lg sm:leading-9">
-              ที่นี่เป็นพื้นที่เล็ก ๆ สำหรับเรื่องที่เคียล่าสนใจ
-              สิ่งที่กำลังลองทำ สิ่งที่กำลังค้นหา
-              รวมถึงเรื่องราวที่อยากเอามาแบ่งปันให้ทุกคนได้รู้จัก
+            <p className="mt-4">
+              สำหรับงานวิดีโอ จะนำภาพที่สร้างจาก Gemini
+              ไปใช้เป็นพื้นฐานในการสร้างต่อด้วย Grok
             </p>
 
-            <a
-              href="/"
-              className="mt-8 inline-flex items-center rounded-full border border-[#39324a] px-6 py-3 text-sm font-medium tracking-wide text-[#39324a] transition hover:bg-[#39324a] hover:text-white"
-            >
-              EXPLORE KYLA'S WORLD
-            </a>
+            <p className="mt-4">
+              ทุก Prompt ถูกจัดหมวดหมู่ตาม Theme
+              เพื่อให้เลือกชมและค้นหาไอเดียที่สนใจได้ง่ายขึ้น
+            </p>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-[#d9d3df]" />
+
+          {/* English */}
+          <div>
+            <p>
+              This Prompt Collection focuses on image creation with Gemini
+              and ChatGPT, exploring different ideas, looks, and stories
+              through each prompt.
+            </p>
+
+            <p className="mt-4">
+              For video projects, images created with Gemini are used as the
+              foundation for further creation with Grok.
+            </p>
+
+            <p className="mt-4">
+              All prompts are organized by Theme, making it easy to browse
+              and discover ideas that interest you.
+            </p>
           </div>
         </div>
-      </section>
+      </details>
+
+      <a
+        href="/"
+        className="mt-8 inline-flex items-center rounded-full border border-[#39324a] px-6 py-3 text-sm font-medium tracking-wide text-[#39324a] transition hover:bg-[#39324a] hover:text-white"
+      >
+        EXPLORE PROMPT COLLECTION
+      </a>
+    </div>
+  </div>
+</section>
 
       {/* Let's Stay in Touch */}
 <section className="mx-auto w-full max-w-[1400px] px-6 pb-16 pt-16 sm:px-10 sm:pb-20 sm:pt-20 lg:px-16">

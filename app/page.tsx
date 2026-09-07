@@ -57,26 +57,45 @@ export default async function Home() {
       <Hero />
 
       {/* Intro */}
-      <section
-        style={{
-          maxWidth: "1100px",
-          margin: "0 auto",
-          padding: "40px 20px 20px",
-          textAlign: "center",
-        }}
-      >
-        <p
-          style={{
-            maxWidth: "700px",
-            margin: "0 auto",
-            lineHeight: 1.8,
-            color: "#555",
-          }}
-        >
-          รวม Prompt สำหรับสร้างภาพ
-          พร้อมจัดหมวดหมู่ตาม Theme
-        </p>
-      </section>
+<section
+  style={{
+    maxWidth: "1100px",
+    margin: "0 auto",
+    padding: "40px 20px 20px",
+    textAlign: "center",
+  }}
+>
+  <div
+    style={{
+      maxWidth: "700px",
+      margin: "0 auto",
+      lineHeight: 1.8,
+      color: "#555",
+    }}
+  >
+    {/* Thai */}
+    <p style={{ margin: 0 }}>
+      รวม Prompt สำหรับสร้างภาพของน้องเคียล่า
+      <br />
+      ถ่ายทอดไอเดีย ลุค และเรื่องราวผ่าน Gemini และ ChatGPT
+      <br />
+      เลือกดู Prompt ที่สนใจได้จาก Theme ด้านล่างเลยจ้า
+    </p>
+
+    {/* English */}
+    <p
+      style={{
+        margin: "16px 0 0",
+      }}
+    >
+      Kyla’s Prompt Collection for image creation
+      <br />
+      Exploring ideas, looks, and stories with Gemini and ChatGPT
+      <br />
+      Browse the Themes below and find a prompt that inspires you.
+    </p>
+  </div>
+</section>
 
       {/* Theme Tabs + Gallery */}
       <section
