@@ -743,7 +743,7 @@ export async function getPromptThemes(): Promise<string[]> {
 }
 
 async function queryPromptThemes(): Promise<string[]> {
-  const themes = new Set<string>();
+  const themeLatestPublished = new Map<string, string>();
   let startCursor: string | undefined;
 
   do {
@@ -758,6 +758,12 @@ async function queryPromptThemes(): Promise<string[]> {
             },
           },
         },
+        sorts: [
+          {
+            property: "Published Date",
+            direction: "descending",
+          },
+        ],
         page_size: 100,
         ...(startCursor
           ? {
@@ -772,7 +778,26 @@ async function queryPromptThemes(): Promise<string[]> {
 
       const category = getPromptCategory(page.properties);
 
-      if (category) themes.add(category);
+      if (!category) return;
+
+      const publishedDate = getDate(
+        page.properties["Published Date"]
+      );
+
+      if (!publishedDate) return;
+
+      const currentLatest =
+        themeLatestPublished.get(category);
+
+      if (
+        !currentLatest ||
+        publishedDate > currentLatest
+      ) {
+        themeLatestPublished.set(
+          category,
+          publishedDate
+        );
+      }
     });
 
     startCursor = response.has_more
@@ -780,7 +805,11 @@ async function queryPromptThemes(): Promise<string[]> {
       : undefined;
   } while (startCursor);
 
-  return Array.from(themes);
+  return Array.from(themeLatestPublished.entries())
+    .sort(([, dateA], [, dateB]) =>
+      dateB.localeCompare(dateA)
+    )
+    .map(([theme]) => theme);
 }
 
 /**
