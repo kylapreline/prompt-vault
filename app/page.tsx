@@ -75,11 +75,18 @@ export default async function Home() {
   >
     {/* Thai */}
     <p style={{ margin: 0 }}>
+      <span className="max-[640px]:hidden">
       รวม Prompt สำหรับสร้างภาพของน้องเคียล่า
       <br />
       ถ่ายทอดไอเดีย ลุค และเรื่องราวผ่าน Gemini และ ChatGPT
       <br />
       เลือกดู Prompt ที่สนใจได้จาก Theme ด้านล่างเลยจ้า
+      </span>
+      <span className="hidden max-[640px]:inline">
+        รวม Prompt สร้างภาพของน้องเคียล่า
+        <br />
+        ถ่ายทอดไอเดียและเรื่องราวผ่าน Gemini และ ChatGPT
+      </span>
     </p>
 
     {/* English */}
@@ -88,11 +95,18 @@ export default async function Home() {
         margin: "16px 0 0",
       }}
     >
+      <span className="max-[640px]:hidden">
       Kyla’s Prompt Collection for image creation
       <br />
       Exploring ideas, looks, and stories with Gemini and ChatGPT
       <br />
       Browse the Themes below and find a prompt that inspires you.
+      </span>
+      <span className="hidden max-[640px]:inline">
+        Kyla’s Prompt Collection
+        <br />
+        Ideas, looks &amp; stories with Gemini &amp; ChatGPT
+      </span>
     </p>
   </div>
 </section>
