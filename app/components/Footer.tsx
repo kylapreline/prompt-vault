@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SocialLinks from "./SocialLinks";
 
 export default function Footer() {
   return (
@@ -33,49 +34,7 @@ export default function Footer() {
 
         <div className="text-center sm:text-right">
           <div className="flex items-center justify-center gap-5 sm:justify-end">
-            <a
-              className="text-[#39324a] transition-opacity hover:opacity-60"
-              href="https://www.facebook.com/KylaPreline"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Kyla Preline on Facebook"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className="h-6 w-6"
-                aria-hidden="true"
-              >
-                <path d="M13.5 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.5 1.6-1.5h1.7V3.9c-.3 0-1.3-.1-2.4-.1-2.4 0-4.1 1.5-4.1 4.2V10H8v3h2.3v8h3.2Z" />
-              </svg>
-            </a>
-
-            <a
-              className="text-[#39324a] transition-opacity hover:opacity-60"
-              href="https://www.instagram.com/kpreline/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Kyla Preline on Instagram"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                className="h-6 w-6"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="5" />
-                <circle cx="12" cy="12" r="4" />
-                <circle
-                  cx="17.5"
-                  cy="6.5"
-                  r="1"
-                  fill="currentColor"
-                  stroke="none"
-                />
-              </svg>
-            </a>
+            <SocialLinks variant="footer" />
           </div>
 
           <p className="mt-6 text-xs text-[#8b8396]">

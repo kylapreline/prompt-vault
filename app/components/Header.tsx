@@ -4,8 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-const facebookUrl = "https://www.facebook.com/KylaPreline";
-const instagramUrl = "https://www.instagram.com/kpreline/";
+import SocialLinks from "./SocialLinks";
 
 type SearchPrompt = {
   id: string;
@@ -39,6 +38,28 @@ function SearchIcon() {
 }
 
 export default function Header() {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    function closeMobileMenu(event: KeyboardEvent) {
+      if (event.key === "Escape" && isMobileMenuOpen) {
+        setIsMobileMenuOpen(false);
+        mobileMenuButtonRef.current?.focus();
+      }
+    }
+    const desktop = window.matchMedia("(min-width: 641px)");
+    function closeOnDesktop() {
+      if (desktop.matches) setIsMobileMenuOpen(false);
+    }
+    window.addEventListener("keydown", closeMobileMenu);
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => {
+      window.removeEventListener("keydown", closeMobileMenu);
+      desktop.removeEventListener("change", closeOnDesktop);
+    };
+  }, [isMobileMenuOpen]);
+
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -262,8 +283,34 @@ export default function Header() {
           display: flex;
         }
 
-        .mobile-nav {
+        .mobile-nav, .mobile-menu {
           display: none;
+        }
+
+        .mobile-menu a, .mobile-menu button {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          width: 100%;
+          min-height: 44px;
+          padding: 10px 16px;
+          color: #25232A;
+          text-decoration: none;
+          font-size: 15px;
+          text-align: left;
+          background: transparent;
+          border: 0;
+          cursor: pointer;
+        }
+
+        .mobile-menu a:hover, .mobile-menu button:hover {
+          background: #eee2f2;
+        }
+
+        .mobile-menu a:focus-visible, .mobile-menu button:focus-visible,
+        .mobile-nav:focus-visible {
+          outline: 2px solid #39324a;
+          outline-offset: -2px;
         }
 
         @media (max-width: 640px) {
@@ -273,17 +320,25 @@ export default function Header() {
 
           .mobile-nav {
             display: flex;
+            margin-left: auto;
+            flex-shrink: 0;
+          }
+
+          .mobile-menu:not([hidden]) {
+            display: block;
           }
         }
       `}</style>
 
       <header
         style={{
+          position: "relative",
           background: "#FCFBFD",
           borderBottom: "1px solid #E7E3EA",
         }}
       >
         <div
+          className="header-inner"
           style={{
             maxWidth: "1100px",
             margin: "0 auto",
@@ -297,6 +352,7 @@ export default function Header() {
           {/* Logo */}
           <Link
             href="/"
+            onClick={() => setIsMobileMenuOpen(false)}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -365,162 +421,71 @@ export default function Header() {
               }}
             />
 
-            {/* Facebook */}
-            <a
-              href={facebookUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Kyla Preline on Facebook"
-              style={{
-                width: "34px",
-                height: "34px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#25232A",
-                textDecoration: "none",
-                borderRadius: "50%",
-              }}
-            >
-              <svg
-                width="19"
-                height="19"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M14 8h3V4h-3c-3.31 0-5 1.69-5 5v3H6v4h3v8h4v-8h3.2l.8-4H13V9c0-.66.34-1 1-1z" />
-              </svg>
-            </a>
-
-            {/* Instagram */}
-            <a
-              href={instagramUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Kyla Preline on Instagram"
-              style={{
-                width: "34px",
-                height: "34px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#25232A",
-                textDecoration: "none",
-                borderRadius: "50%",
-              }}
-            >
-              <svg
-                width="19"
-                height="19"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="5" />
-                <circle cx="12" cy="12" r="4" />
-                <circle
-                  cx="17.5"
-                  cy="6.5"
-                  r="1"
-                  fill="currentColor"
-                  stroke="none"
-                />
-              </svg>
-            </a>
+            <SocialLinks variant="header-desktop" />
           </nav>
 
           {/* Mobile Navigation */}
-          <nav
+          <button
+            ref={mobileMenuButtonRef}
+            type="button"
             className="mobile-nav"
-            aria-label="Mobile navigation"
+            aria-label={isMobileMenuOpen ? "ปิดเมนูนำทาง" : "เปิดเมนูนำทาง"}
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="mobile-navigation"
+            onClick={() => setIsMobileMenuOpen((open) => !open)}
             style={{
+              width: "44px",
+              height: "44px",
               alignItems: "center",
-              gap: "2px",
+              justifyContent: "center",
+              border: 0,
+              borderRadius: "8px",
+              background: "transparent",
+              color: "#25232A",
+              cursor: "pointer",
             }}
           >
-            {/* About */}
-            <Link
-              href="/about"
-              style={{
-                padding: "8px 10px",
-                color: "#25232A",
-                textDecoration: "none",
-                fontSize: "15px",
-              }}
-            >
-              About
-            </Link>
-
-            {searchButton(true)}
-
-            {/* Facebook */}
-            <a
-              href={facebookUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Kyla Preline on Facebook"
-              style={{
-                width: "34px",
-                height: "34px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#25232A",
-                textDecoration: "none",
-              }}
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <path d="M14 8h3V4h-3c-3.31 0-5 1.69-5 5v3H6v4h3v8h4v-8h3.2l.8-4H13V9c0-.66.34-1 1-1z" />
-              </svg>
-            </a>
-
-            {/* Instagram */}
-            <a
-              href={instagramUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Kyla Preline on Instagram"
-              style={{
-                width: "34px",
-                height: "34px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#25232A",
-                textDecoration: "none",
-              }}
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="5" />
-                <circle cx="12" cy="12" r="4" />
-                <circle
-                  cx="17.5"
-                  cy="6.5"
-                  r="1"
-                  fill="currentColor"
-                  stroke="none"
-                />
-              </svg>
-            </a>
-          </nav>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         </div>
+        <nav
+          id="mobile-navigation"
+          className="mobile-menu"
+          aria-label="Mobile navigation"
+          hidden={!isMobileMenuOpen}
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: "20px",
+            right: "20px",
+            zIndex: 100,
+            padding: "8px 0",
+            border: "1px solid #E7E3EA",
+            borderRadius: "12px",
+            background: "#FCFBFD",
+            boxShadow: "0 8px 24px rgba(37, 35, 42, 0.12)",
+            maxHeight: "calc(100dvh - 130px)",
+            overflowY: "auto",
+          }}
+        >
+          <Link href="/" onClick={() => setIsMobileMenuOpen(false)}>Home</Link>
+          <Link href="/about" onClick={() => setIsMobileMenuOpen(false)}>About Me</Link>
+          <button type="button" onClick={() => {
+            setIsMobileMenuOpen(false);
+            openSearch();
+          }}>Search</button>
+          <hr style={{ margin: "8px 16px", border: 0, borderTop: "1px solid #D8D3DC" }} />
+          <SocialLinks
+            variant="header-mobile"
+            showLabels
+            onLinkClick={() => {
+              setIsMobileMenuOpen(false);
+              mobileMenuButtonRef.current?.focus();
+            }}
+          />
+        </nav>
       </header>
 
       {isSearchOpen && (
