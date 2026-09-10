@@ -1,4 +1,6 @@
-import { Client } from "@notionhq/client";
+import "server-only";
+
+import { Client, type QueryDataSourceParameters } from "@notionhq/client";
 
 const notion = new Client({
   auth: process.env.NOTION_TOKEN,
@@ -70,6 +72,7 @@ export type PromptPage = {
 export type PromptPageOptions = {
   category?: string | null;
   cursor?: string | null;
+  query?: string | null;
   pageSize?: number;
 };
 
@@ -699,6 +702,37 @@ const GALLERY_PAGE_SIZE = 16;
 const GALLERY_CACHE_TTL = 60 * 1000;
 const THEME_CACHE_TTL = 10 * 60 * 1000;
 
+const GALLERY_REQUEST_TIMEOUT_MS = 8_000;
+const MAX_SEARCH_BATCHES = 20;
+
+export class PromptSearchTimeoutError extends Error {
+  constructor() {
+    super("Prompt search timed out");
+    this.name = "PromptSearchTimeoutError";
+  }
+}
+
+export class InvalidPromptCursorError extends Error {}
+
+function decodeSearchCursor(cursor: string | null | undefined): {
+  startCursor?: string;
+  offset: number;
+} {
+  if (!cursor?.startsWith("search:")) {
+    return { startCursor: cursor || undefined, offset: 0 };
+  }
+  try {
+    const value = JSON.parse(Buffer.from(cursor.slice(7), "base64url").toString());
+    if (
+      (value.startCursor !== undefined && typeof value.startCursor !== "string") ||
+      !Number.isInteger(value.offset) || value.offset < 0 || value.offset >= 100
+    ) throw new Error("Invalid cursor");
+    return { startCursor: value.startCursor, offset: value.offset };
+  } catch {
+    throw new InvalidPromptCursorError("Invalid search cursor");
+  }
+}
+
 type GalleryCacheEntry = {
   page: PromptPage;
   expiresAt: number;
@@ -822,14 +856,17 @@ async function queryPromptThemes(): Promise<string[]> {
 export async function getPromptVaultPage({
   category,
   cursor,
+  query,
   pageSize = GALLERY_PAGE_SIZE,
 }: PromptPageOptions = {}): Promise<PromptPage> {
   const safePageSize = Math.min(
     GALLERY_PAGE_SIZE,
     Math.max(1, Math.floor(pageSize))
   );
+  const normalizedQuery = query?.trim().toLowerCase() || "";
   const cacheKey = JSON.stringify([
     category ?? "All",
+    normalizedQuery,
     cursor ?? "",
     safePageSize,
   ]);
@@ -845,11 +882,14 @@ export async function getPromptVaultPage({
     return existingRequest;
   }
 
-  const request = queryPromptVaultPage(
-    category,
-    cursor,
-    safePageSize
-  );
+  const deadline = Date.now() + GALLERY_REQUEST_TIMEOUT_MS;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const request = Promise.race([
+    queryPromptVaultPage(category, cursor, normalizedQuery, safePageSize, deadline),
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new PromptSearchTimeoutError()), GALLERY_REQUEST_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timeout));
 
   galleryRequests.set(cacheKey, request);
 
@@ -867,11 +907,45 @@ export async function getPromptVaultPage({
   }
 }
 
+/** Short queries (1–3 characters) must start at a word boundary. */
+function matchesPromptQuery(prompt: Prompt, query: string): boolean {
+  const searchableText = [
+    prompt.title,
+    prompt.introTh,
+    prompt.introEn,
+    prompt.category ?? "",
+    ...prompt.tags,
+  ].map((text) => text.toLowerCase());
+
+  if (Array.from(query).length > 3) {
+    return searchableText.some((text) => text.includes(query));
+  }
+
+  // Unicode letters/marks keep Thai words intact; punctuation is a boundary.
+  const wordCharacter = /[\p{L}\p{N}\p{M}_]/u;
+  return searchableText.some((text) => {
+    let index = text.indexOf(query);
+    while (index !== -1) {
+      const precedingCharacter = Array.from(text.slice(0, index)).pop();
+      if (!precedingCharacter || !wordCharacter.test(precedingCharacter)) {
+        return true;
+      }
+      index = text.indexOf(query, index + 1);
+    }
+    return false;
+  });
+}
+
 async function queryPromptVaultPage(
   category: string | null | undefined,
   cursor: string | null | undefined,
-  pageSize: number
+  query: string | null | undefined,
+  pageSize: number,
+  deadline: number
 ): Promise<PromptPage> {
+  type DataSourceFilter = NonNullable<
+    QueryDataSourceParameters["filter"]
+  >;
 
   const publishedFilter = {
     property: "Is Published?",
@@ -882,44 +956,81 @@ async function queryPromptVaultPage(
     },
   } as const;
 
-  const response = await notionRequest(() =>
-    notion.dataSources.query({
-      data_source_id: dataSourceId,
-      filter: category
-        ? {
-            and: [
-              publishedFilter,
-              {
-                property: "แท็ก",
-                multi_select: {
-                  contains: category,
-                },
-              },
-            ],
-          }
-        : publishedFilter,
-      sorts: [
-        {
-          property: "Published Date",
-          direction: "descending",
+  const categoryFilter = category
+    ? {
+        property: "แท็ก",
+        multi_select: {
+          contains: category,
         },
-      ],
-      page_size: pageSize,
-      ...(cursor
-        ? {
-            start_cursor: cursor,
-          }
-        : {}),
-    })
-  );
+      } as const
+    : null;
 
-  return {
-    prompts: response.results.map((page) =>
-      mapPageToPrompt(page)
-    ),
-    nextCursor: response.next_cursor,
-    hasMore: response.has_more,
+  // Search only on the server: Notion text filters can omit case variants.
+  const filter: DataSourceFilter = categoryFilter
+    ? { and: [publishedFilter, categoryFilter] }
+    : publishedFilter;
+  const prompts: Prompt[] = [];
+  let { startCursor, offset } = query
+    ? decodeSearchCursor(cursor)
+    : { startCursor: cursor || undefined, offset: 0 };
+  let batches = 0;
+  const assertWithinBudget = () => {
+    if (Date.now() >= deadline) throw new PromptSearchTimeoutError();
   };
+
+  do {
+    assertWithinBudget();
+    if (++batches > MAX_SEARCH_BATCHES) throw new PromptSearchTimeoutError();
+    const response = await notionRequest(() => {
+      // The request queue also counts against the deadline. Never start
+      // another Notion call after the caller has already timed out.
+      assertWithinBudget();
+      const galleryNotion = new Client({
+        auth: process.env.NOTION_TOKEN,
+        timeoutMs: Math.max(1, deadline - Date.now()),
+        retry: false,
+      });
+      return galleryNotion.dataSources.query({
+        data_source_id: dataSourceId,
+        filter,
+        sorts: [{ property: "Published Date", direction: "descending" }],
+        page_size: query ? 100 : pageSize,
+        ...(startCursor ? { start_cursor: startCursor } : {}),
+      });
+    });
+    assertWithinBudget();
+
+    for (let index = offset; index < response.results.length; index++) {
+      const page = response.results[index];
+      if (!("properties" in page)) continue;
+      const prompt = mapPageToPrompt(page);
+      if (query && !matchesPromptQuery(prompt, query)) continue;
+
+      if (prompts.length === pageSize) {
+        // Resume at this unreturned match within the same Notion batch.
+        const nextCursor = "search:" + Buffer.from(
+          JSON.stringify({ startCursor, offset: index })
+        ).toString("base64url");
+        return { prompts, nextCursor, hasMore: true };
+      }
+      prompts.push(prompt);
+    }
+
+    startCursor = response.has_more
+      ? response.next_cursor ?? undefined
+      : undefined;
+    offset = 0;
+
+    if (!query) {
+      return {
+        prompts,
+        nextCursor: startCursor ?? null,
+        hasMore: Boolean(startCursor),
+      };
+    }
+  } while (startCursor);
+
+  return { prompts, nextCursor: null, hasMore: false };
 }
 
 export async function getPromptVault(): Promise<

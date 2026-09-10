@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Prompt, PromptPage } from "../lib/notion";
 import PromptCard from "./PromptCard";
 
@@ -12,23 +12,36 @@ export default function ThemeTabs({
   themes: string[];
 }) {
   const [activeTheme, setActiveTheme] = useState("All");
-  const [pages, setPages] = useState<Record<string, PromptPage>>({
-    All: initialPage,
-  });
-  const [loadingTheme, setLoadingTheme] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(initialPage);
+  const [loadedQueryKey, setLoadedQueryKey] = useState("All\u0000");
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const queryKey = `${activeTheme}\u0000${debouncedQuery}`;
+  const currentQueryKey = useRef(queryKey);
 
-  const currentPage = pages[activeTheme];
+  const isDebouncing = searchTerm.trim() !== debouncedQuery;
+  const currentPage =
+    !isDebouncing && loadedQueryKey === queryKey ? page : null;
   const prompts = currentPage?.prompts ?? [];
-  const isLoading = loadingTheme === activeTheme;
+  const isLoading = loadedQueryKey !== queryKey || isLoadingMore;
 
-  async function fetchPage(theme: string, cursor?: string | null) {
+  async function fetchPage(
+    theme: string,
+    query: string,
+    cursor?: string | null,
+    signal?: AbortSignal
+  ) {
     const params = new URLSearchParams();
 
     if (theme !== "All") params.set("category", theme);
+    if (query) params.set("q", query);
     if (cursor) params.set("cursor", cursor);
 
-    const response = await fetch(`/api/prompts?${params.toString()}`);
+    const response = await fetch(`/api/prompts?${params.toString()}`, {
+      signal,
+    });
 
     if (!response.ok) {
       throw new Error("Unable to load prompts");
@@ -37,56 +50,125 @@ export default function ThemeTabs({
     return (await response.json()) as PromptPage;
   }
 
-  async function selectTheme(theme: string) {
-    if (loadingTheme && loadingTheme !== theme) return;
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedQuery(searchTerm.trim());
+    }, 300);
 
-    setActiveTheme(theme);
-    setError(null);
+    return () => window.clearTimeout(timeout);
+  }, [searchTerm]);
 
-    if (pages[theme] || loadingTheme === theme) return;
+  useEffect(() => {
+    currentQueryKey.current = queryKey;
+  }, [queryKey]);
 
-    setLoadingTheme(theme);
+  useEffect(() => {
+    if (loadedQueryKey === queryKey) return;
 
-    try {
-      const page = await fetchPage(theme);
-      setPages((current) => ({ ...current, [theme]: page }));
-    } catch (loadError) {
-      console.error(loadError);
-      setError("โหลด Prompt ไม่สำเร็จ กรุณาลองอีกครั้ง");
-    } finally {
-      setLoadingTheme(null);
-    }
-  }
+    const controller = new AbortController();
+    const requestedKey = queryKey;
+
+    fetchPage(activeTheme, debouncedQuery, null, controller.signal)
+      .then((nextPage) => {
+        if (currentQueryKey.current !== requestedKey) return;
+        setPage(nextPage);
+        setLoadedQueryKey(requestedKey);
+      })
+      .catch((loadError: unknown) => {
+        if (controller.signal.aborted) return;
+        console.error(loadError);
+        setPage({ prompts: [], nextCursor: null, hasMore: false });
+        setLoadedQueryKey(requestedKey);
+        setError("โหลด Prompt ไม่สำเร็จ กรุณาลองอีกครั้ง");
+      });
+
+    return () => controller.abort();
+  }, [activeTheme, debouncedQuery, loadedQueryKey, queryKey]);
 
   async function loadMore() {
     if (!currentPage?.nextCursor || isLoading) return;
 
-    setLoadingTheme(activeTheme);
+    const requestedKey = queryKey;
+    setIsLoadingMore(true);
     setError(null);
 
     try {
-      const nextPage = await fetchPage(activeTheme, currentPage.nextCursor);
-      setPages((current) => ({
-        ...current,
-        [activeTheme]: {
-          prompts: [
-            ...(current[activeTheme]?.prompts ?? []),
-            ...nextPage.prompts,
-          ],
-          nextCursor: nextPage.nextCursor,
-          hasMore: nextPage.hasMore,
-        },
+      const nextPage = await fetchPage(
+        activeTheme,
+        debouncedQuery,
+        currentPage.nextCursor
+      );
+
+      if (currentQueryKey.current !== requestedKey) return;
+
+      setPage((current) => ({
+        prompts: [...current.prompts, ...nextPage.prompts],
+        nextCursor: nextPage.nextCursor,
+        hasMore: nextPage.hasMore,
       }));
     } catch (loadError) {
+      if (currentQueryKey.current !== requestedKey) return;
       console.error(loadError);
       setError("โหลด Prompt เพิ่มไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
-      setLoadingTheme(null);
+      if (currentQueryKey.current === requestedKey) {
+        setIsLoadingMore(false);
+      }
     }
+  }
+
+  function updateSearch(value: string) {
+    setSearchTerm(value);
+    setError(null);
+    setIsLoadingMore(false);
   }
 
   return (
     <section>
+      <div
+        role="search"
+        style={{
+          display: "flex",
+          gap: "10px",
+          marginBottom: "18px",
+        }}
+      >
+        <input
+          type="search"
+          value={searchTerm}
+          onChange={(event) => updateSearch(event.target.value)}
+          placeholder="ค้นหา Prompt..."
+          aria-label="ค้นหา Prompt"
+          style={{
+            width: "100%",
+            padding: "11px 14px",
+            border: "1px solid #ddd",
+            borderRadius: "10px",
+            background: "#fff",
+            color: "#111",
+            fontSize: "15px",
+          }}
+        />
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={() => updateSearch("")}
+            aria-label="ล้างคำค้นหา"
+            style={{
+              flexShrink: 0,
+              padding: "0 16px",
+              border: "1px solid #ddd",
+              borderRadius: "10px",
+              background: "#fff",
+              color: "#333",
+              cursor: "pointer",
+            }}
+          >
+            ล้าง
+          </button>
+        )}
+      </div>
+
       {/* Tabs */}
       <nav
         style={{
@@ -104,7 +186,11 @@ export default function ThemeTabs({
             <button
               key={theme}
               type="button"
-              onClick={() => selectTheme(theme)}
+              onClick={() => {
+                setActiveTheme(theme);
+                setError(null);
+                setIsLoadingMore(false);
+              }}
               style={{
                 flexShrink: 0,
                 padding: "9px 18px",
@@ -149,15 +235,17 @@ export default function ThemeTabs({
             />
           ))}
         </div>
-      ) : isLoading ? (
-        <p style={{ color: "#777" }}>กำลังโหลด Prompt...</p>
+      ) : isLoading || isDebouncing ? (
+        <p style={{ color: "#777" }}>กำลังค้นหา Prompt...</p>
       ) : (
         <p
           style={{
             color: "#777",
           }}
         >
-          ยังไม่มี Prompt ใน Theme นี้
+          {debouncedQuery
+            ? `ไม่พบ Prompt สำหรับ “${debouncedQuery}” ใน Theme นี้`
+            : "ยังไม่มี Prompt ใน Theme นี้"}
         </p>
       )}
 
