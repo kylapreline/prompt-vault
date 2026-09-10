@@ -1,4 +1,6 @@
-import { Client } from "@notionhq/client";
+import "server-only";
+
+import { Client, type QueryDataSourceParameters } from "@notionhq/client";
 
 const notion = new Client({
   auth: process.env.NOTION_TOKEN,
@@ -70,6 +72,7 @@ export type PromptPage = {
 export type PromptPageOptions = {
   category?: string | null;
   cursor?: string | null;
+  query?: string | null;
   pageSize?: number;
 };
 
@@ -822,6 +825,7 @@ async function queryPromptThemes(): Promise<string[]> {
 export async function getPromptVaultPage({
   category,
   cursor,
+  query,
   pageSize = GALLERY_PAGE_SIZE,
 }: PromptPageOptions = {}): Promise<PromptPage> {
   const safePageSize = Math.min(
@@ -830,6 +834,7 @@ export async function getPromptVaultPage({
   );
   const cacheKey = JSON.stringify([
     category ?? "All",
+    query ?? "",
     cursor ?? "",
     safePageSize,
   ]);
@@ -848,6 +853,7 @@ export async function getPromptVaultPage({
   const request = queryPromptVaultPage(
     category,
     cursor,
+    query,
     safePageSize
   );
 
@@ -870,8 +876,12 @@ export async function getPromptVaultPage({
 async function queryPromptVaultPage(
   category: string | null | undefined,
   cursor: string | null | undefined,
+  query: string | null | undefined,
   pageSize: number
 ): Promise<PromptPage> {
+  type DataSourceFilter = NonNullable<
+    QueryDataSourceParameters["filter"]
+  >;
 
   const publishedFilter = {
     property: "Is Published?",
@@ -882,22 +892,50 @@ async function queryPromptVaultPage(
     },
   } as const;
 
+  const categoryFilter = category
+    ? {
+        property: "แท็ก",
+        multi_select: {
+          contains: category,
+        },
+      } as const
+    : null;
+
+  const searchFilter = query
+    ? {
+        or: [
+          {
+            property: "ชื่อ",
+            title: { contains: query },
+          },
+          {
+            property: "Intro (TH)",
+            rich_text: { contains: query },
+          },
+          {
+            property: "Intro (EN)",
+            rich_text: { contains: query },
+          },
+          {
+            property: "แท็ก",
+            multi_select: { contains: query },
+          },
+        ],
+      } satisfies DataSourceFilter
+    : null;
+
+  const filter: DataSourceFilter = categoryFilter
+    ? searchFilter
+      ? { and: [publishedFilter, categoryFilter, searchFilter] }
+      : { and: [publishedFilter, categoryFilter] }
+    : searchFilter
+      ? { and: [publishedFilter, searchFilter] }
+      : publishedFilter;
+
   const response = await notionRequest(() =>
     notion.dataSources.query({
       data_source_id: dataSourceId,
-      filter: category
-        ? {
-            and: [
-              publishedFilter,
-              {
-                property: "แท็ก",
-                multi_select: {
-                  contains: category,
-                },
-              },
-            ],
-          }
-        : publishedFilter,
+      filter,
       sorts: [
         {
           property: "Published Date",
