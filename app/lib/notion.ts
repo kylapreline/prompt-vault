@@ -832,9 +832,10 @@ export async function getPromptVaultPage({
     GALLERY_PAGE_SIZE,
     Math.max(1, Math.floor(pageSize))
   );
+  const normalizedQuery = query?.trim().toLowerCase() || "";
   const cacheKey = JSON.stringify([
     category ?? "All",
-    query ?? "",
+    normalizedQuery,
     cursor ?? "",
     safePageSize,
   ]);
@@ -853,7 +854,7 @@ export async function getPromptVaultPage({
   const request = queryPromptVaultPage(
     category,
     cursor,
-    query,
+    normalizedQuery,
     safePageSize
   );
 
@@ -871,6 +872,35 @@ export async function getPromptVaultPage({
   } finally {
     galleryRequests.delete(cacheKey);
   }
+}
+
+/** Short queries (1–3 characters) must start at a word boundary. */
+function matchesPromptQuery(prompt: Prompt, query: string): boolean {
+  const searchableText = [
+    prompt.title,
+    prompt.introTh,
+    prompt.introEn,
+    prompt.category ?? "",
+    ...prompt.tags,
+  ].map((text) => text.toLowerCase());
+
+  if (Array.from(query).length > 3) {
+    return searchableText.some((text) => text.includes(query));
+  }
+
+  // Unicode letters/marks keep Thai words intact; punctuation is a boundary.
+  const wordCharacter = /[\p{L}\p{N}\p{M}_]/u;
+  return searchableText.some((text) => {
+    let index = text.indexOf(query);
+    while (index !== -1) {
+      const precedingCharacter = Array.from(text.slice(0, index)).pop();
+      if (!precedingCharacter || !wordCharacter.test(precedingCharacter)) {
+        return true;
+      }
+      index = text.indexOf(query, index + 1);
+    }
+    return false;
+  });
 }
 
 async function queryPromptVaultPage(
@@ -901,63 +931,60 @@ async function queryPromptVaultPage(
       } as const
     : null;
 
-  const searchFilter = query
-    ? {
-        or: [
+  // Search only on the server: Notion text filters can omit case variants.
+  const filter: DataSourceFilter = categoryFilter
+    ? { and: [publishedFilter, categoryFilter] }
+    : publishedFilter;
+  const prompts: Prompt[] = [];
+  let startCursor = cursor || undefined;
+  let continuationCursor: string | null = null;
+
+  do {
+    const response = await notionRequest(() =>
+      notion.dataSources.query({
+        data_source_id: dataSourceId,
+        filter,
+        sorts: [
           {
-            property: "ชื่อ",
-            title: { contains: query },
-          },
-          {
-            property: "Intro (TH)",
-            rich_text: { contains: query },
-          },
-          {
-            property: "Intro (EN)",
-            rich_text: { contains: query },
-          },
-          {
-            property: "แท็ก",
-            multi_select: { contains: query },
+            property: "Published Date",
+            direction: "descending",
           },
         ],
-      } satisfies DataSourceFilter
-    : null;
+        // Never consume more matches than fit. Once full, look ahead for
+        // another match while retaining the cursor just after this page.
+        page_size: prompts.length === pageSize ? 100 : pageSize - prompts.length,
+        ...(startCursor ? { start_cursor: startCursor } : {}),
+      })
+    );
 
-  const filter: DataSourceFilter = categoryFilter
-    ? searchFilter
-      ? { and: [publishedFilter, categoryFilter, searchFilter] }
-      : { and: [publishedFilter, categoryFilter] }
-    : searchFilter
-      ? { and: [publishedFilter, searchFilter] }
-      : publishedFilter;
+    const matches = response.results
+      .filter((page) => "properties" in page)
+      .map((page) => mapPageToPrompt(page))
+      .filter((prompt) => !query || matchesPromptQuery(prompt, query));
 
-  const response = await notionRequest(() =>
-    notion.dataSources.query({
-      data_source_id: dataSourceId,
-      filter,
-      sorts: [
-        {
-          property: "Published Date",
-          direction: "descending",
-        },
-      ],
-      page_size: pageSize,
-      ...(cursor
-        ? {
-            start_cursor: cursor,
-          }
-        : {}),
-    })
-  );
+    if (prompts.length === pageSize && matches.length > 0) {
+      return { prompts, nextCursor: continuationCursor, hasMore: true };
+    }
 
-  return {
-    prompts: response.results.map((page) =>
-      mapPageToPrompt(page)
-    ),
-    nextCursor: response.next_cursor,
-    hasMore: response.has_more,
-  };
+    prompts.push(...matches);
+    startCursor = response.has_more
+      ? response.next_cursor ?? undefined
+      : undefined;
+
+    if (!query) {
+      return {
+        prompts,
+        nextCursor: startCursor ?? null,
+        hasMore: Boolean(startCursor),
+      };
+    }
+
+    if (prompts.length === pageSize && continuationCursor === null) {
+      continuationCursor = startCursor ?? null;
+    }
+  } while (startCursor);
+
+  return { prompts, nextCursor: null, hasMore: false };
 }
 
 export async function getPromptVault(): Promise<

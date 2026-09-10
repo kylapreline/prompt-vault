@@ -244,6 +244,8 @@ export default function Header() {
               About Me
             </Link>
 
+            {searchButton()}
+
             {/* Divider */}
             <span
               aria-hidden="true"
@@ -254,8 +256,6 @@ export default function Header() {
                 margin: "0 6px",
               }}
             />
-
-            {searchButton()}
 
             {/* Facebook */}
             <a
