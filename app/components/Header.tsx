@@ -16,6 +16,8 @@ type SearchPrompt = {
 
 type SearchResponse = {
   prompts: SearchPrompt[];
+  hasMore: boolean;
+  nextCursor: string | null;
 };
 
 function SearchIcon() {
@@ -40,11 +42,15 @@ export default function Header() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [searchResponse, setSearchResponse] = useState<{
+  const [searchResponse, setSearchResponse] = useState<SearchResponse & {
     query: string;
-    prompts: SearchPrompt[];
     error: string | null;
-  }>({ query: "", prompts: [], error: null });
+  }>({ query: "", prompts: [], hasMore: false, nextCursor: null, error: null });
+  const [loadMoreState, setLoadMoreState] = useState<{
+    loading: boolean;
+    error: string | null;
+  }>({ loading: false, error: null });
+  const loadMoreRequestRef = useRef<AbortController | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -86,6 +92,8 @@ export default function Header() {
       setSearchResponse({
         query: debouncedQuery,
         prompts: [],
+        hasMore: false,
+        nextCursor: null,
         error: "การค้นหาใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
       });
     }, 10_000);
@@ -105,6 +113,8 @@ export default function Header() {
         setSearchResponse({
           query: debouncedQuery,
           prompts: response.prompts,
+          hasMore: response.hasMore,
+          nextCursor: response.nextCursor,
           error: null,
         });
       })
@@ -114,6 +124,8 @@ export default function Header() {
         setSearchResponse({
           query: debouncedQuery,
           prompts: [],
+          hasMore: false,
+          nextCursor: null,
           error: searchError instanceof Error && searchError.message === "Search timed out"
             ? "การค้นหาใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
             : "ค้นหา Prompt ไม่สำเร็จ กรุณาลองอีกครั้ง",
@@ -131,6 +143,14 @@ export default function Header() {
     };
   }, [debouncedQuery, isSearchOpen]);
 
+  useEffect(() => {
+    return () => {
+      loadMoreRequestRef.current?.abort();
+      loadMoreRequestRef.current = null;
+      setLoadMoreState({ loading: false, error: null });
+    };
+  }, [searchTerm, isSearchOpen]);
+
   const isDebouncing = searchTerm.trim() !== debouncedQuery;
   const isSearching =
     Boolean(searchTerm.trim()) &&
@@ -140,7 +160,71 @@ export default function Header() {
       ? searchResponse.prompts
       : [];
 
+  async function loadMore() {
+    const { query, nextCursor, hasMore } = searchResponse;
+    if (
+      loadMoreRequestRef.current || !isSearchOpen || isSearching ||
+      !hasMore || !nextCursor || query !== searchTerm.trim()
+    ) return;
+
+    const controller = new AbortController();
+    loadMoreRequestRef.current = controller;
+    setLoadMoreState({ loading: true, error: null });
+    const timeout = window.setTimeout(() => {
+      if (loadMoreRequestRef.current !== controller) return;
+      controller.abort();
+      loadMoreRequestRef.current = null;
+      setLoadMoreState({
+        loading: false,
+        error: "โหลดเพิ่มเติมใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
+      });
+    }, 10_000);
+
+    try {
+      const params = new URLSearchParams({ q: query, cursor: nextCursor });
+      const response = await fetch(`/api/prompts?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      if (response.status === 504) throw new Error("Search timed out");
+      if (!response.ok) throw new Error("Unable to load more prompts");
+      const page = (await response.json()) as SearchResponse;
+      if (!Array.isArray(page.prompts)) throw new Error("Invalid search response");
+      if (loadMoreRequestRef.current !== controller) return;
+
+      setSearchResponse((previous) => {
+        if (previous.query !== query || previous.nextCursor !== nextCursor) return previous;
+        const seen = new Set(previous.prompts.map((prompt) => prompt.id));
+        const additional = page.prompts.filter((prompt) => {
+          if (seen.has(prompt.id)) return false;
+          seen.add(prompt.id);
+          return true;
+        });
+        return {
+          ...previous,
+          prompts: [...previous.prompts, ...additional],
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor,
+        };
+      });
+      setLoadMoreState({ loading: false, error: null });
+    } catch (error) {
+      if (loadMoreRequestRef.current !== controller) return;
+      setLoadMoreState({
+        loading: false,
+        error: error instanceof Error && error.message === "Search timed out"
+          ? "โหลดเพิ่มเติมใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
+          : "โหลดเพิ่มเติมไม่สำเร็จ กรุณาลองอีกครั้ง",
+      });
+    } finally {
+      window.clearTimeout(timeout);
+      if (loadMoreRequestRef.current === controller) {
+        loadMoreRequestRef.current = null;
+      }
+    }
+  }
+
   function openSearch() {
+    setSearchResponse({ query: "", prompts: [], hasMore: false, nextCursor: null, error: null });
     setIsSearchOpen(true);
   }
 
@@ -625,6 +709,32 @@ export default function Header() {
                       </div>
                     </Link>
                   ))}
+                  {searchResponse.hasMore && searchResponse.nextCursor && (
+                    <div style={{ paddingTop: "16px", textAlign: "center" }}>
+                      <button
+                        type="button"
+                        onClick={loadMore}
+                        disabled={loadMoreState.loading}
+                        aria-busy={loadMoreState.loading}
+                        style={{
+                          padding: "10px 18px",
+                          border: "1px solid #D8D3DC",
+                          borderRadius: "10px",
+                          background: "#EEEAF1",
+                          color: "#39324A",
+                          cursor: loadMoreState.loading ? "wait" : "pointer",
+                          opacity: loadMoreState.loading ? 0.65 : 1,
+                        }}
+                      >
+                        {loadMoreState.loading ? "กำลังโหลดเพิ่มเติม..." : "โหลดเพิ่มเติม"}
+                      </button>
+                      {loadMoreState.error && (
+                        <p role="alert" style={{ color: "#b42318", fontSize: "13px", margin: "8px 0 0" }}>
+                          {loadMoreState.error}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
