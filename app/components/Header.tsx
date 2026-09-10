@@ -78,16 +78,30 @@ export default function Header() {
     if (!isSearchOpen || !debouncedQuery) return;
 
     const controller = new AbortController();
+    let active = true;
+    const timeout = window.setTimeout(() => {
+      if (!active) return;
+      active = false;
+      controller.abort();
+      setSearchResponse({
+        query: debouncedQuery,
+        prompts: [],
+        error: "การค้นหาใช้เวลานานเกินไป กรุณาลองอีกครั้ง",
+      });
+    }, 10_000);
     const params = new URLSearchParams({ q: debouncedQuery });
 
     fetch(`/api/prompts?${params.toString()}`, {
       signal: controller.signal,
     })
       .then(async (response) => {
+        if (response.status === 504) throw new Error("Search timed out");
         if (!response.ok) throw new Error("Unable to search prompts");
         return (await response.json()) as SearchResponse;
       })
       .then((response) => {
+        if (!active) return;
+        if (!Array.isArray(response.prompts)) throw new Error("Invalid search response");
         setSearchResponse({
           query: debouncedQuery,
           prompts: response.prompts,
@@ -95,21 +109,31 @@ export default function Header() {
         });
       })
       .catch((searchError: unknown) => {
-        if (controller.signal.aborted) return;
+        if (!active) return;
         console.error(searchError);
         setSearchResponse({
           query: debouncedQuery,
           prompts: [],
-          error: "ค้นหา Prompt ไม่สำเร็จ กรุณาลองอีกครั้ง",
+          error: searchError instanceof Error && searchError.message === "Search timed out"
+            ? "การค้นหาใช้เวลานานเกินไป กรุณาลองอีกครั้ง"
+            : "ค้นหา Prompt ไม่สำเร็จ กรุณาลองอีกครั้ง",
         });
+      })
+      .finally(() => {
+        active = false;
+        window.clearTimeout(timeout);
       });
 
-    return () => controller.abort();
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [debouncedQuery, isSearchOpen]);
 
   const isDebouncing = searchTerm.trim() !== debouncedQuery;
   const isSearching =
-    Boolean(debouncedQuery) &&
+    Boolean(searchTerm.trim()) &&
     (isDebouncing || searchResponse.query !== debouncedQuery);
   const visiblePrompts =
     !isDebouncing && searchResponse.query === debouncedQuery

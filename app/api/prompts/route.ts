@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPromptVaultPage } from "../../lib/notion";
+import { getPromptVaultPage, InvalidPromptCursorError, PromptSearchTimeoutError } from "../../lib/notion";
 
 export const runtime = "nodejs";
 
@@ -29,6 +29,12 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof InvalidPromptCursorError) {
+      return NextResponse.json({ error: "Invalid gallery cursor" }, { status: 400 });
+    }
+    if (error instanceof PromptSearchTimeoutError) {
+      return NextResponse.json({ error: "Search timed out. Please try again." }, { status: 504 });
+    }
     console.error("Prompt gallery API error:", error);
 
     return NextResponse.json(

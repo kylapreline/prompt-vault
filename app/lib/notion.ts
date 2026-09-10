@@ -702,6 +702,37 @@ const GALLERY_PAGE_SIZE = 16;
 const GALLERY_CACHE_TTL = 60 * 1000;
 const THEME_CACHE_TTL = 10 * 60 * 1000;
 
+const GALLERY_REQUEST_TIMEOUT_MS = 8_000;
+const MAX_SEARCH_BATCHES = 20;
+
+export class PromptSearchTimeoutError extends Error {
+  constructor() {
+    super("Prompt search timed out");
+    this.name = "PromptSearchTimeoutError";
+  }
+}
+
+export class InvalidPromptCursorError extends Error {}
+
+function decodeSearchCursor(cursor: string | null | undefined): {
+  startCursor?: string;
+  offset: number;
+} {
+  if (!cursor?.startsWith("search:")) {
+    return { startCursor: cursor || undefined, offset: 0 };
+  }
+  try {
+    const value = JSON.parse(Buffer.from(cursor.slice(7), "base64url").toString());
+    if (
+      (value.startCursor !== undefined && typeof value.startCursor !== "string") ||
+      !Number.isInteger(value.offset) || value.offset < 0 || value.offset >= 100
+    ) throw new Error("Invalid cursor");
+    return { startCursor: value.startCursor, offset: value.offset };
+  } catch {
+    throw new InvalidPromptCursorError("Invalid search cursor");
+  }
+}
+
 type GalleryCacheEntry = {
   page: PromptPage;
   expiresAt: number;
@@ -851,12 +882,14 @@ export async function getPromptVaultPage({
     return existingRequest;
   }
 
-  const request = queryPromptVaultPage(
-    category,
-    cursor,
-    normalizedQuery,
-    safePageSize
-  );
+  const deadline = Date.now() + GALLERY_REQUEST_TIMEOUT_MS;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const request = Promise.race([
+    queryPromptVaultPage(category, cursor, normalizedQuery, safePageSize, deadline),
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new PromptSearchTimeoutError()), GALLERY_REQUEST_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(timeout));
 
   galleryRequests.set(cacheKey, request);
 
@@ -907,7 +940,8 @@ async function queryPromptVaultPage(
   category: string | null | undefined,
   cursor: string | null | undefined,
   query: string | null | undefined,
-  pageSize: number
+  pageSize: number,
+  deadline: number
 ): Promise<PromptPage> {
   type DataSourceFilter = NonNullable<
     QueryDataSourceParameters["filter"]
@@ -936,40 +970,56 @@ async function queryPromptVaultPage(
     ? { and: [publishedFilter, categoryFilter] }
     : publishedFilter;
   const prompts: Prompt[] = [];
-  let startCursor = cursor || undefined;
-  let continuationCursor: string | null = null;
+  let { startCursor, offset } = query
+    ? decodeSearchCursor(cursor)
+    : { startCursor: cursor || undefined, offset: 0 };
+  let batches = 0;
+  const assertWithinBudget = () => {
+    if (Date.now() >= deadline) throw new PromptSearchTimeoutError();
+  };
 
   do {
-    const response = await notionRequest(() =>
-      notion.dataSources.query({
+    assertWithinBudget();
+    if (++batches > MAX_SEARCH_BATCHES) throw new PromptSearchTimeoutError();
+    const response = await notionRequest(() => {
+      // The request queue also counts against the deadline. Never start
+      // another Notion call after the caller has already timed out.
+      assertWithinBudget();
+      const galleryNotion = new Client({
+        auth: process.env.NOTION_TOKEN,
+        timeoutMs: Math.max(1, deadline - Date.now()),
+        retry: false,
+      });
+      return galleryNotion.dataSources.query({
         data_source_id: dataSourceId,
         filter,
-        sorts: [
-          {
-            property: "Published Date",
-            direction: "descending",
-          },
-        ],
-        // Never consume more matches than fit. Once full, look ahead for
-        // another match while retaining the cursor just after this page.
-        page_size: prompts.length === pageSize ? 100 : pageSize - prompts.length,
+        sorts: [{ property: "Published Date", direction: "descending" }],
+        page_size: query ? 100 : pageSize,
         ...(startCursor ? { start_cursor: startCursor } : {}),
-      })
-    );
+      });
+    });
+    assertWithinBudget();
 
-    const matches = response.results
-      .filter((page) => "properties" in page)
-      .map((page) => mapPageToPrompt(page))
-      .filter((prompt) => !query || matchesPromptQuery(prompt, query));
+    for (let index = offset; index < response.results.length; index++) {
+      const page = response.results[index];
+      if (!("properties" in page)) continue;
+      const prompt = mapPageToPrompt(page);
+      if (query && !matchesPromptQuery(prompt, query)) continue;
 
-    if (prompts.length === pageSize && matches.length > 0) {
-      return { prompts, nextCursor: continuationCursor, hasMore: true };
+      if (prompts.length === pageSize) {
+        // Resume at this unreturned match within the same Notion batch.
+        const nextCursor = "search:" + Buffer.from(
+          JSON.stringify({ startCursor, offset: index })
+        ).toString("base64url");
+        return { prompts, nextCursor, hasMore: true };
+      }
+      prompts.push(prompt);
     }
 
-    prompts.push(...matches);
     startCursor = response.has_more
       ? response.next_cursor ?? undefined
       : undefined;
+    offset = 0;
 
     if (!query) {
       return {
@@ -977,10 +1027,6 @@ async function queryPromptVaultPage(
         nextCursor: startCursor ?? null,
         hasMore: Boolean(startCursor),
       };
-    }
-
-    if (prompts.length === pageSize && continuationCursor === null) {
-      continuationCursor = startCursor ?? null;
     }
   } while (startCursor);
 
