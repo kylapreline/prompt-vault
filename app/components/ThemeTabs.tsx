@@ -12,31 +12,25 @@ export default function ThemeTabs({
   themes: string[];
 }) {
   const [activeTheme, setActiveTheme] = useState("All");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(initialPage);
-  const [loadedQueryKey, setLoadedQueryKey] = useState("All\u0000");
+  const [loadedTheme, setLoadedTheme] = useState("All");
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const queryKey = `${activeTheme}\u0000${debouncedQuery}`;
-  const currentQueryKey = useRef(queryKey);
+  const currentTheme = useRef(activeTheme);
 
-  const isDebouncing = searchTerm.trim() !== debouncedQuery;
   const currentPage =
-    !isDebouncing && loadedQueryKey === queryKey ? page : null;
+    loadedTheme === activeTheme ? page : null;
   const prompts = currentPage?.prompts ?? [];
-  const isLoading = loadedQueryKey !== queryKey || isLoadingMore;
+  const isLoading = loadedTheme !== activeTheme || isLoadingMore;
 
   async function fetchPage(
     theme: string,
-    query: string,
     cursor?: string | null,
     signal?: AbortSignal
   ) {
     const params = new URLSearchParams();
 
     if (theme !== "All") params.set("category", theme);
-    if (query) params.set("q", query);
     if (cursor) params.set("cursor", cursor);
 
     const response = await fetch(`/api/prompts?${params.toString()}`, {
@@ -51,55 +45,46 @@ export default function ThemeTabs({
   }
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setDebouncedQuery(searchTerm.trim());
-    }, 300);
-
-    return () => window.clearTimeout(timeout);
-  }, [searchTerm]);
+    currentTheme.current = activeTheme;
+  }, [activeTheme]);
 
   useEffect(() => {
-    currentQueryKey.current = queryKey;
-  }, [queryKey]);
-
-  useEffect(() => {
-    if (loadedQueryKey === queryKey) return;
+    if (loadedTheme === activeTheme) return;
 
     const controller = new AbortController();
-    const requestedKey = queryKey;
+    const requestedTheme = activeTheme;
 
-    fetchPage(activeTheme, debouncedQuery, null, controller.signal)
+    fetchPage(activeTheme, null, controller.signal)
       .then((nextPage) => {
-        if (currentQueryKey.current !== requestedKey) return;
+        if (currentTheme.current !== requestedTheme) return;
         setPage(nextPage);
-        setLoadedQueryKey(requestedKey);
+        setLoadedTheme(requestedTheme);
       })
       .catch((loadError: unknown) => {
         if (controller.signal.aborted) return;
         console.error(loadError);
         setPage({ prompts: [], nextCursor: null, hasMore: false });
-        setLoadedQueryKey(requestedKey);
+        setLoadedTheme(requestedTheme);
         setError("โหลด Prompt ไม่สำเร็จ กรุณาลองอีกครั้ง");
       });
 
     return () => controller.abort();
-  }, [activeTheme, debouncedQuery, loadedQueryKey, queryKey]);
+  }, [activeTheme, loadedTheme]);
 
   async function loadMore() {
     if (!currentPage?.nextCursor || isLoading) return;
 
-    const requestedKey = queryKey;
+    const requestedTheme = activeTheme;
     setIsLoadingMore(true);
     setError(null);
 
     try {
       const nextPage = await fetchPage(
         activeTheme,
-        debouncedQuery,
         currentPage.nextCursor
       );
 
-      if (currentQueryKey.current !== requestedKey) return;
+      if (currentTheme.current !== requestedTheme) return;
 
       setPage((current) => ({
         prompts: [...current.prompts, ...nextPage.prompts],
@@ -107,68 +92,18 @@ export default function ThemeTabs({
         hasMore: nextPage.hasMore,
       }));
     } catch (loadError) {
-      if (currentQueryKey.current !== requestedKey) return;
+      if (currentTheme.current !== requestedTheme) return;
       console.error(loadError);
       setError("โหลด Prompt เพิ่มไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
-      if (currentQueryKey.current === requestedKey) {
+      if (currentTheme.current === requestedTheme) {
         setIsLoadingMore(false);
       }
     }
   }
 
-  function updateSearch(value: string) {
-    setSearchTerm(value);
-    setError(null);
-    setIsLoadingMore(false);
-  }
-
   return (
     <section>
-      <div
-        role="search"
-        style={{
-          display: "flex",
-          gap: "10px",
-          marginBottom: "18px",
-        }}
-      >
-        <input
-          type="search"
-          value={searchTerm}
-          onChange={(event) => updateSearch(event.target.value)}
-          placeholder="ค้นหา Prompt..."
-          aria-label="ค้นหา Prompt"
-          style={{
-            width: "100%",
-            padding: "11px 14px",
-            border: "1px solid #ddd",
-            borderRadius: "10px",
-            background: "#fff",
-            color: "#111",
-            fontSize: "15px",
-          }}
-        />
-        {searchTerm && (
-          <button
-            type="button"
-            onClick={() => updateSearch("")}
-            aria-label="ล้างคำค้นหา"
-            style={{
-              flexShrink: 0,
-              padding: "0 16px",
-              border: "1px solid #ddd",
-              borderRadius: "10px",
-              background: "#fff",
-              color: "#333",
-              cursor: "pointer",
-            }}
-          >
-            ล้าง
-          </button>
-        )}
-      </div>
-
       {/* Tabs */}
       <nav
         style={{
@@ -235,17 +170,15 @@ export default function ThemeTabs({
             />
           ))}
         </div>
-      ) : isLoading || isDebouncing ? (
-        <p style={{ color: "#777" }}>กำลังค้นหา Prompt...</p>
+      ) : isLoading ? (
+        <p style={{ color: "#777" }}>กำลังโหลด Prompt...</p>
       ) : (
         <p
           style={{
             color: "#777",
           }}
         >
-          {debouncedQuery
-            ? `ไม่พบ Prompt สำหรับ “${debouncedQuery}” ใน Theme นี้`
-            : "ยังไม่มี Prompt ใน Theme นี้"}
+          ยังไม่มี Prompt ใน Theme นี้
         </p>
       )}
 
