@@ -163,10 +163,11 @@ export default function ThemeTabs({
             gap: "20px",
           }}
         >
-          {prompts.map((prompt: Prompt) => (
+          {prompts.map((prompt: Prompt, index) => (
             <PromptCard
               key={prompt.id}
               prompt={prompt}
+              isLcp={activeTheme === "All" && index === 0}
             />
           ))}
         </div>

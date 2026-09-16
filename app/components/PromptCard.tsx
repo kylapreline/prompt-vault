@@ -3,8 +3,10 @@ import type { Prompt } from "../lib/notion";
 
 export default function PromptCard({
   prompt,
+  isLcp = false,
 }: {
   prompt: Prompt;
+  isLcp?: boolean;
 }) {
   return (
     <Link
@@ -18,6 +20,7 @@ export default function PromptCard({
             <img
               src={prompt.mainImageUrl}
               alt={prompt.title}
+              fetchPriority={isLcp ? "high" : undefined}
               className="block aspect-[4/5] w-full object-cover transition duration-500 group-hover:scale-[1.02]"
             />
           ) : (
