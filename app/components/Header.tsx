@@ -279,6 +279,15 @@ export default function Header() {
   return (
     <>
       <style>{`
+        .header-logo {
+          display: block;
+          width: auto;
+          height: 68px;
+          max-width: 100%;
+          object-fit: contain;
+          object-position: left center;
+        }
+
         .desktop-nav {
           display: flex;
         }
@@ -314,6 +323,10 @@ export default function Header() {
         }
 
         @media (max-width: 640px) {
+          .header-logo {
+            height: 46px;
+          }
+
           .desktop-nav {
             display: none;
           }
@@ -357,19 +370,18 @@ export default function Header() {
               display: "inline-flex",
               alignItems: "center",
               textDecoration: "none",
-              flexShrink: 0,
+              flexShrink: 1,
+              minWidth: 0,
             }}
           >
             <Image
-              src="/Kyla-Preline_logo.png"
+              className="header-logo"
+              src="/images/KylaPreline_Header-Logo.png"
               alt="Kyla Preline"
-              width={180}
-              height={50}
-              priority
-              style={{
-                width: "180px",
-                height: "auto",
-              }}
+              width={1200}
+              height={400}
+              sizes="(max-width: 640px) 138px, 204px"
+              preload
             />
           </Link>
 

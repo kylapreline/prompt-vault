@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   title: "Kyla Preline's Prompt Vault",
   description: "Prompt gallery by Kyla Preline",
   icons: {
-    icon: "/Kyla-favicon.png",
+    icon: "/KP-favicon.png",
   },
 };
 

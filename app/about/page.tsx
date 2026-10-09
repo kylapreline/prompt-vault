@@ -35,7 +35,7 @@ export default function AboutPage() {
       <section className="mx-auto w-full max-w-[1400px] px-4 pt-6">
         <div className="relative overflow-hidden">
           <Image
-            src="/Kyla-about-me-hero.jpg"
+            src="/Kyla-AboutMe_hero_20261009.jpg"
             alt="Kyla Preline"
             width={1600}
             height={900}

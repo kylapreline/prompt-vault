@@ -5,7 +5,7 @@ export default function Hero() {
     <section className="w-full">
       <div className="relative w-full overflow-hidden">
         <Image
-          src="/Kyla-web-hero_edit1.jpg"
+          src="/Kyla-web-hero_20261009.jpg"
           alt="Kyla Preline's Prompt Vault"
           width={1600}
           height={500}

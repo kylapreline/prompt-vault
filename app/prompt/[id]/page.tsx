@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getPromptById } from "../../lib/notion";
-import CopyPromptButton from "../../test-page/CopyPromptButton";
+import CopyPromptButton from "../../components/CopyPromptButton";
 
 type PageProps = {
   params: Promise<{
